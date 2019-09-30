@@ -4,7 +4,9 @@ import torch
 from collections import OrderedDict
 
 
-def get_output_shapes(model, input_t, layer_type):
+def get_output_shapes(model, input_t, layer_type=None):
+    if layer_type is None:
+        layer_type = object
     sizes = OrderedDict()
 
     def print_shape(name):
@@ -35,7 +37,7 @@ def _set_absmax(hmap, absmax=1.0):
         return hmap
 
 
-def _to_rgb(img):
+def to_rgb(img):
     if len(img.shape) == 2:
         return np.stack((img, img, img), axis=2)
     elif img.shape[2] == 1:
@@ -86,7 +88,7 @@ def plot_heatmap(img, hmap, plotter=None, ax=None,
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(5.5, 4.0))
 
-    ax.imshow(_to_rgb(denormalize(to_np_img(img)).mean(2)))
+    ax.imshow(to_rgb(denormalize(to_np_img(img)).mean(2)))
 
     ax1_divider = make_axes_locatable(ax)
     cax1 = ax1_divider.append_axes("right", size=Fixed(colorbar_size),
