@@ -63,26 +63,18 @@ class SpatialGaussianKernel(nn.Module):
         return self.conv(self.pad(x))
 
 
-class Estimator(nn.Module):
-    def mean(self):
-        raise NotImplementedError()
-
-    def std(self):
-        raise NotImplementedError()
-
-    def n_samples(self):
-        raise NotImplementedError()
-
-
-class WelfordEstimator(Estimator):
+class WelfordEstimator(nn.Module):
     def __init__(self, channels, height, width, eps=1e-5):
         super().__init__()
         self.register_buffer('m', torch.zeros(channels, height, width))
         self.register_buffer('s', torch.zeros(channels, height, width))
         self.register_buffer('_n_samples', torch.tensor([0], dtype=torch.long))
+        self.register_buffer('_neuron_nonzero', torch.zeros(channels, height, width,
+                                                            dtype=torch.long))
 
     def forward(self, x):
         for xi in x:
+            self._neuron_nonzero += (xi != 0.).long()
             old_m = self.m.clone()
             self.m = self.m + (xi-self.m) / (self._n_samples.float() + 1)
             self.s = self.s + (xi-self.m) * (xi-old_m)
@@ -97,29 +89,8 @@ class WelfordEstimator(Estimator):
     def std(self):
         return torch.sqrt(self.s / (self._n_samples.float() - 1))
 
-
-class RunningEstimator(Estimator):
-    def __init__(self, channels, height, width, eps=1e-5):
-        super().__init__()
-        self.channels = channels
-        self.height = height
-        self.width = width
-        self.bn = nn.BatchNorm1d(channels*height*width, affine=False)
-        self.register_buffer('_n_samples', torch.tensor([0], dtype=torch.long))
-
-    def forward(self, x):
-        self.bn(x.view(len(x), -1))
-        self._n_samples += len(x)
-
-    def n_samples(self):
-        return int(self._n_samples.item())
-
-    def mean(self):
-        return self.bn.running_mean.view(self.channels, self.height, self.width)
-
-    def std(self):
-        return self.bn.running_var.view(self.channels, self.height, self.width).sqrt()
-
+    def active_neurons(self, threshold=0.01):
+        return (self._neuron_nonzero.float() / self._n_samples.float()) > threshold
 
 class InterruptExecution(Exception):
     pass
@@ -149,7 +120,6 @@ class PerSampleBottleneck(nn.Module):
         lr: optimizer learning rate. default: 1
         batch_size: number of samples to use per iteration
         initial_alpha: initial value for the parameter.
-        estimate_during_training: estimate mean and std during training
     """
     def __init__(self,
                  channels,
@@ -162,7 +132,6 @@ class PerSampleBottleneck(nn.Module):
                  lr=1,
                  batch_size=10,
                  initial_alpha=5.0,
-                 estimate_during_training=False,
                  progbar=False,
                  relu=False):
         super().__init__()
@@ -177,7 +146,6 @@ class PerSampleBottleneck(nn.Module):
         self.batch_size = batch_size
         self.initial_alpha = initial_alpha
         self.alpha = nn.Parameter(initial_alpha * torch.ones(channels, height, width))
-        self.estimate_during_training = estimate_during_training
         self.progbar = progbar
         self.sigmoid = nn.Sigmoid()
         self.buffer_capacity = None  # Filled on forward pass, used for loss
@@ -187,11 +155,11 @@ class PerSampleBottleneck(nn.Module):
             self.smooth = SpatialGaussianKernel(kernel_size, sigma, channels)
         else:
             self.smooth = None
-        self._use_welford = False
-        self.estim_welford = WelfordEstimator(channels, height, width)
-        self.estim_running = RunningEstimator(channels, height, width)
-        self.mean = None
-        self.std = None
+        self.estimator = WelfordEstimator(channels, height, width)
+        self._estimate = False
+        self._mean = None
+        self._std = None
+        self._active_neurons = None
         self._supress_information = False
         self._interrupt_execution = False
 
@@ -204,10 +172,8 @@ class PerSampleBottleneck(nn.Module):
     def forward(self, x):
         if self._supress_information:
             return self._do_restrict_information(x)
-        if self._use_welford:
-            self.estim_welford(x)
-        if self.training and self.estimate_during_training:
-            self.estim_running(x)
+        if self._estimate:
+            self.estimator(x)
         if self._interrupt_execution:
             raise InterruptExecution()
         return x
@@ -246,7 +212,7 @@ class PerSampleBottleneck(nn.Module):
         lamb = self.smooth(lamb) if self.smooth is not None else lamb
 
         # Normalize x
-        x_norm = (x - self.mean) / self.std
+        x_norm = (x - self._mean) / self._std
 
         # Get sampling parameters
 
@@ -257,27 +223,26 @@ class PerSampleBottleneck(nn.Module):
         # Sample new output values from p(z|x)
         log_var = torch.clamp(log_var, -10, 10)
         z_norm = self._sample_z(mu, log_var)
-        self.buffer_capacity = self._calc_capacity(mu, log_var)
-
+        self.buffer_capacity = self._calc_capacity(mu, log_var) * self._active_neurons
         # Denormalize z to match magnitude of x
-        z = z_norm * self.std + self.mean
-
+        z = z_norm * self._std + self._mean
+        z *= self._active_neurons
         # Clamp output, if input was post-relu
         if self.relu:
             z = torch.clamp(z, 0.0)
         return z
 
     @contextmanager
-    def use_welford(self):
-        self._use_welford = True
+    def enable_estimation(self):
+        self._estimate = True
         try:
             yield
         finally:
-            self._use_welford = False
+            self._estimate = False
 
-    def estimate(self, model, loader, device=None, progbar=False):
+    def estimate(self, model, loader, device=None, n_samples=10000, progbar=False):
         """ Estimate mean and variance using the welford estimator.
-            Usually, using a 10.000 i.i.d. samples should be more than good enough.
+            Usually, using 10.000 i.i.d. samples should be enough.
         """
         try:
             import tqdm
@@ -290,8 +255,9 @@ class PerSampleBottleneck(nn.Module):
         if device is None:
             device = next(iter(model.parameters())).device
         for (imgs, _) in loader:
-
-            with torch.no_grad(), self.interrupt_execution(), self.use_welford():
+            if self.estimator.n_samples() > n_samples:
+                break
+            with torch.no_grad(), self.interrupt_execution(), self.enable_estimation():
                 model(imgs.to(device))
 
     @contextmanager
@@ -305,7 +271,7 @@ class PerSampleBottleneck(nn.Module):
     def heatmap(self, input_t, model_loss_fn,
                 estimator='auto',
                 beta=None, min_std=None, optimization_steps=None,
-                lr=None, batch_size=None, initial_alpha=None):
+                lr=None, batch_size=None, initial_alpha=None, active_neurons_threshold=0.01):
         """
         Generates a heatmap for a given sample. Make sure you estimated mean and variance of the
         input distribution.
@@ -335,19 +301,14 @@ class PerSampleBottleneck(nn.Module):
         self._reset_alpha(initial_alpha)
         optimizer = torch.optim.Adam(lr=lr, params=[self.alpha])
 
-        if estimator == 'welford' or (estimator == 'auto' and self.estim_welford.n_samples() > 0):
-            estim = self.estim_welford
-        elif estimator in ['running', 'auto']:
-            estim = self.estim_running
-        else:
-            raise ValueError("estimator must be either auto, welford, running. Got " + estimator)
-        if estim.n_samples() < 1000:
-            warnings.warn("Selected estimator was only fitted on {} samples. Might not be enough! We recommend 10.000 samples."
-                          .format(estim.n_samples()))
-        self.mean = estim.mean()
-
-        std = estim.std()
-        self.std = torch.max(std, self.min_std*torch.ones_like(std))
+        if self.estimator.n_samples() < 1000:
+            warnings.warn("Selected estimator was only fitted on {} samples. "
+                          "Might not be enough! We recommend 10.000 samples."
+                          .format(self.estimator.n_samples()))
+        self._mean = self.estimator.mean()
+        std = self.estimator.std()
+        self._active_neurons = self.estimator.active_neurons(active_neurons_threshold).float()
+        self._std = torch.max(std, self.min_std*torch.ones_like(std))
 
         with self.supress_information():
             for _ in tqdm(range(optimization_steps), desc="Training Bottleneck",
@@ -363,9 +324,7 @@ class PerSampleBottleneck(nn.Module):
         return self._current_heatmap(input_t.shape[2:])
 
     def capacity(self):
-        """
-        returns the currenct capacity from the last input
-        """
+        """ returns the currenct capacity from the last input """
         return self.buffer_capacity[0]
 
     def _current_heatmap(self, shape=None):

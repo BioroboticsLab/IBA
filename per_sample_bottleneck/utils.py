@@ -47,7 +47,22 @@ def to_rgb(img):
         return img
 
 
-def denormalize(img: np.ndarray):
+def denormalize(img):
+    if type(img) == torch.Tensor:
+        if len(img.shape) == 3:
+            img = img.cpu().numpy()
+            if img.shape[0] == 3:
+                img = img.transpose(1, 2, 0)
+            elif img.shape[0] == 1:
+                img = img[0]
+            else:
+                raise ValueError('torch images must have 1 or 3 channels. Got {}'
+                                 .format(img.shape[0]))
+        elif len(img.shape) == 2:
+            img = img.cpu().numpy()
+        else:
+            raise ValueError('torch images must have 2 or 3 dimensions. Got shape {}'
+                             .format(img.shape))
     mean3 = [0.485, 0.456, 0.406]
     std3 = [0.229, 0.224, 0.225]
     mean1 = [0.5]
