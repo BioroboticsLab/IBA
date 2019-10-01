@@ -16,8 +16,10 @@ model.conv4 = nn.Sequential(model.conv4, btln)
 # Estimate the mean and variance
 btln.estimate(model, datagen)
 
-# Create heatmaps
+# Closure that returns the loss for one batch
 model_loss_closure = lambda x: -torch.log_softmax(model(x), 1)[:, target].mean()
+
+# Create the heatmap
 heatmap = btln.heatmap(img[None].to(dev), model_loss_closure)
 ```
 
