@@ -1,8 +1,3 @@
-.. per-sample-bottleneck documentation master file, created by
-   sphinx-quickstart on Mon Sep 30 11:54:45 2019.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
 Welcome to per-sample-bottleneck's documentation!
 =================================================
 
@@ -10,7 +5,13 @@ Welcome to per-sample-bottleneck's documentation!
    :caption: Contents:
    :maxdepth: 2
 
-   api
+   api/per_sample_bottleneck
+   api/utilsper_sample_bottleneck
+
+
+This is the documentation of the per-sample-bottleneck package.
+Please see our README for installation and basic usage.
+We also provide an examplary jupyter notebook.
 
 
 Indices and tables

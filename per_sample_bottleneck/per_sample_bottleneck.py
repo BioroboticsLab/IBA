@@ -15,18 +15,11 @@ def _to_np(t: torch.Tensor):
 
 
 def insert_into_sequential(sequential, layer, idx):
-    """
+    """returns a ``nn.Sequential`` with ``layer`` inserted in ``sequential`` at position ``idx``.
     """
     children = list(sequential.children())
     children.insert(idx, layer)
     return nn.Sequential(*children)
-
-
-def patch_layer(layer, btln):
-    return nn.Sequential([
-        layer,
-        btln,
-    ])
 
 
 class SpatialGaussianKernel(nn.Module):
@@ -57,6 +50,7 @@ class SpatialGaussianKernel(nn.Module):
         self.pad = nn.ReflectionPad2d(int((kernel_size - 1) / 2))
 
     def parameters(self):
+        """returns no parameters"""
         return []
 
     def forward(self, x):
@@ -64,7 +58,36 @@ class SpatialGaussianKernel(nn.Module):
 
 
 class WelfordEstimator(nn.Module):
-    def __init__(self, channels, height, width, eps=1e-5):
+    """
+    Estimates the mean and standard derivation.
+    For the algorithm see ``https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance``.
+
+    Args:
+        channels: The number of channels of the feature map
+        height: The heigth of the feature map
+        width: The width of the feature map
+
+    Example:
+        Given a batch of images ``imgs`` with shape ``(10, 3, 64, 64)``, the mean and std could
+        be estimated as follows::
+
+            imgs = torch.randn(10, 3, 64, 64)
+            estim = WelfordEstimator(3, 64, 64)
+            estim(imgs)
+
+            # returns the estimated mean
+            estim.mean()
+
+            # returns the estimated std
+            estim.std()
+
+            # returns the number of samples, here 10
+            estim.n_samples()
+
+            # returns a mask with active neurons
+            estim.active_neurons()
+    """
+    def __init__(self, channels, height, width):
         super().__init__()
         self.register_buffer('m', torch.zeros(channels, height, width))
         self.register_buffer('s', torch.zeros(channels, height, width))
@@ -81,18 +104,26 @@ class WelfordEstimator(nn.Module):
             self._n_samples += 1
 
     def n_samples(self):
+        """returns the number of seen samples."""
         return int(self._n_samples.item())
 
     def mean(self):
+        """returns the estimate of the mean."""
         return self.m
 
     def std(self):
+        """returns the estimate of the standard derivation."""
         return torch.sqrt(self.s / (self._n_samples.float() - 1))
 
     def active_neurons(self, threshold=0.01):
+        """
+        Returns a mask of all active neurons.
+        A neuron is considered active if ``n_nonzero / n_samples  > threshold``
+        """
         return (self._neuron_nonzero.float() / self._n_samples.float()) > threshold
 
-class InterruptExecution(Exception):
+
+class _InterruptExecution(Exception):
     pass
 
 
@@ -100,14 +131,22 @@ class PerSampleBottleneck(nn.Module):
     """
     The Per Sample Bottleneck provides attribution heatmaps for you model.
 
-    To apply it to your model you have to:
-        1. Add it to your model. Either by including it as a module or by inserting it into a
-        existing one with ``insert_into_sequential`` or ``insert_after_layer``.
+    Example:
+        ::
 
-        2. Estimate the mean and variance by calling ``estimate(model, datagen)``.
+            # Create the Per-Sample Bottleneck:
+            btln = PerSampleBottleneck(channels, height, width)
 
-        3. Call ``.heatmap()``
+            # Add it to your model
+            model.conv4 = nn.Sequential(model.conv4, btln)
 
+            # Estimate the mean and variance
+            btln.estimate(model, datagen)
+
+            # Create heatmaps
+            model_loss_closure = lambda x: -torch.log_softmax(model(x), 1)[:, target].mean()
+            heatmap = btln.heatmap(img[None].to(dev), model_loss_closure)
+            ```
 
     Args:
         channels: C form an input of size `(N, C, H, W)`
@@ -175,19 +214,27 @@ class PerSampleBottleneck(nn.Module):
         if self._estimate:
             self.estimator(x)
         if self._interrupt_execution:
-            raise InterruptExecution()
+            raise _InterruptExecution()
         return x
 
     @contextmanager
     def interrupt_execution(self):
         """
-        Interrupts the execution of the model, once PerSampleBottleneck is called. Very useful
-        for estimating.
+        Interrupts the execution of the model, once PerSampleBottleneck is called. Useful
+        for estimation when the model has only be executed until the Per-Sample Bottleneck.
+
+        Example:
+            Executes the model only until the bottleneck layer::
+
+                with bltn.interrupt_execution():
+                    out = model(x)
+                    # out will not be defined
+                    print("this will not be printed")
         """
         self._interrupt_execution = True
         try:
             yield
-        except InterruptExecution:
+        except _InterruptExecution:
             pass
         finally:
             self._interrupt_execution = False
@@ -234,6 +281,10 @@ class PerSampleBottleneck(nn.Module):
 
     @contextmanager
     def enable_estimation(self):
+        """
+        Context manager to enable estimation of the mean and standard derivation.
+        We recommend to use the `self.estimate` method.
+        """
         self._estimate = True
         try:
             yield
@@ -242,7 +293,7 @@ class PerSampleBottleneck(nn.Module):
 
     def estimate(self, model, loader, device=None, n_samples=10000, progbar=False):
         """ Estimate mean and variance using the welford estimator.
-            Usually, using 10.000 i.i.d. samples should be enough.
+            Usually, using 10.000 i.i.d. samples should give decent estimates.
         """
         try:
             import tqdm
@@ -262,6 +313,16 @@ class PerSampleBottleneck(nn.Module):
 
     @contextmanager
     def supress_information(self):
+        """
+        Context mananger to enable information supression.
+
+        Example:
+            To make a prediction, with the information flow being supressed.::
+
+                with btln.supress_information():
+                    # now noise is added
+                    model(x)
+        """
         self._supress_information = True
         try:
             yield
@@ -286,6 +347,10 @@ class PerSampleBottleneck(nn.Module):
             lr: if not None, overrides the bottleneck lr value
             batch_size: if not None, overrides the bottleneck batch_size value
             initial_alpha: if not None, overrides the bottleneck initial_alpha value
+            active_neurons_threshold: used threshold to determine if a neuron is active
+
+        Returns:
+            The heatmap of the same shape as the ``input_t``.
         """
         assert input_t.shape[0] == 1, "We can only fit one sample a time"
 
@@ -324,7 +389,8 @@ class PerSampleBottleneck(nn.Module):
         return self._current_heatmap(input_t.shape[2:])
 
     def capacity(self):
-        """ returns the currenct capacity from the last input """
+        """returns a tensor with the currenct capacity from the last input.
+        Shape is ``(self.channels, self.height, self.width)``"""
         return self.buffer_capacity[0]
 
     def _current_heatmap(self, shape=None):
