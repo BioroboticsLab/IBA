@@ -6,7 +6,7 @@ applied to pretrained ImageNet networks.
 
 A short usage-description:
 
-```
+```python
 # Create the Per-Sample Bottleneck:
 btln = PerSampleBottleneck(channels, height, width)
 
@@ -25,12 +25,12 @@ heatmap = btln.heatmap(img[None].to(dev), model_loss_closure)
 
 You can either install it directly from git:
 ```bash
-$ pip install git+
+$ pip install git+https://github.com/attribution-bottleneck/per-sample-bottleneck
 ```
 
 Or clone this repository locally and then install it:
 ```bash
-$ git clone
+$ git clone https://github.com/attribution-bottleneck/per-sample-bottleneck
 $ cd per-sample-bottlneck
 $ pip install .
 ```
