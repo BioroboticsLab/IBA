@@ -291,21 +291,41 @@ class PerSampleBottleneck(nn.Module):
         finally:
             self._estimate = False
 
-    def estimate(self, model, loader, device=None, n_samples=10000, progbar=False):
+    def reset_estimate(self):
+        """Resets the estimator. Useful if the distribution changes. Which can happen if you
+        trained the model more.
+        """
+        self.estimator = WelfordEstimator(self.channels, self.height, self.width)
+
+    def estimate(self, model, dataloader, device=None, n_samples=10000, progbar=False, reset=True):
         """ Estimate mean and variance using the welford estimator.
-            Usually, using 10.000 i.i.d. samples should give decent estimates.
+            Usually, using 10.000 i.i.d. samples gives decent estimates.
+
+            Args:
+                model: the model containing the bottleneck layer
+                dataloader: yielding ``batch``'s where the first sample
+                    ``batch[0]`` is the image batch.
+                device: images will be transfered to the device. If ``None``, it uses the device
+                    of the first model parameter.
+                n_samples (int): run the estimate on that many samples
+                progbar (bool): show a progress bar.
+                reset (bool): reset the current estimate of the mean and std
+
         """
         try:
             import tqdm
         except ImportError:
             progbar = False
         if progbar == 'notebook':
-            loader = tqdm.tqdm_notebook(loader)
+            dataloader = tqdm.tqdm_notebook(dataloader)
         elif progbar:
-            loader = tqdm.tqdm(loader)
+            dataloader = tqdm.tqdm(dataloader)
         if device is None:
             device = next(iter(model.parameters())).device
-        for (imgs, _) in loader:
+        if reset:
+            self.reset_estimate()
+        for batch in dataloader:
+            imgs = batch[0]
             if self.estimator.n_samples() > n_samples:
                 break
             with torch.no_grad(), self.interrupt_execution(), self.enable_estimation():

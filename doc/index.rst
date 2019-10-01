@@ -6,7 +6,7 @@ Welcome to per-sample-bottleneck's documentation!
    :maxdepth: 2
 
    api/per_sample_bottleneck
-   api/utilsper_sample_bottleneck
+   api/utils
 
 
 This is the documentation of the per-sample-bottleneck package.

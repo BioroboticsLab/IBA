@@ -13,7 +13,7 @@ btln = PerSampleBottleneck(channels, height, width)
 # Add it to your model
 model.conv4 = nn.Sequential(model.conv4, btln)
 
-# Estimate the mean and variance
+# Estimate the mean and variance.
 btln.estimate(model, datagen)
 
 # Closure that returns the loss for one batch
@@ -21,6 +21,11 @@ model_loss_closure = lambda x: -torch.log_softmax(model(x), 1)[:, target].mean()
 
 # Create the heatmap
 heatmap = btln.heatmap(img[None].to(dev), model_loss_closure)
+
+# If you train your model, input distribution changes and you have to re-estimate the mean and std.
+train(model)
+btln.reset_estimate()
+btln.estimate(model, datagen)
 ```
 
 ## Installation
