@@ -1,7 +1,7 @@
 # Per-Sample Bottleneck
 
 This repository contains an easy-to-use pytorch implementation for the Per-Sample Bottleneck for
-attribution.  In the notebook [example.ipynb](example.ipynb), the Per-Sample Bottleneck is
+attribution. See our paper for more detail: ["Restricting the Flow: Information Bottlenecks for Attribution"](https://openreview.net/forum?id=S1xWh1rYwB). In the notebook [example.ipynb](example.ipynb), the Per-Sample Bottleneck is
 applied to pretrained ImageNet networks.
 
 A short usage-description:
@@ -40,4 +40,20 @@ Or clone this repository locally and then install it:
 $ git clone https://github.com/attribution-bottleneck/per-sample-bottleneck
 $ cd per-sample-bottlneck
 $ pip install .
+```
+
+## Reference
+
+If you use this software for a scientific publication, please cite our paper:
+
+```bibtex
+@inproceedings{
+anonymous2020restricting,
+title={Restricting the Flow: Information Bottlenecks for Attribution},
+author={Anonymous},
+booktitle={Submitted to International Conference on Learning Representations},
+year={2020},
+url={https://openreview.net/forum?id=S1xWh1rYwB},
+note={under review}
+}
 ```
