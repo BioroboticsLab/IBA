@@ -15,7 +15,8 @@ def _to_np(t: torch.Tensor):
 
 
 def insert_into_sequential(sequential, layer, idx):
-    """returns a ``nn.Sequential`` with ``layer`` inserted in ``sequential`` at position ``idx``.
+    """ 
+    Returns a ``nn.Sequential`` with ``layer`` inserted in ``sequential`` at position ``idx``.
     """
     children = list(sequential.children())
     children.insert(idx, layer)
@@ -96,19 +97,21 @@ class WelfordEstimator(nn.Module):
                                                             dtype=torch.long))
 
     def forward(self, x):
+        """ Update estimates without altering x """
         for xi in x:
             self._neuron_nonzero += (xi != 0.).long()
             old_m = self.m.clone()
             self.m = self.m + (xi-self.m) / (self._n_samples.float() + 1)
             self.s = self.s + (xi-self.m) * (xi-old_m)
             self._n_samples += 1
+        return x
 
     def n_samples(self):
-        """returns the number of seen samples."""
+        """ Returns the number of seen samples. """
         return int(self._n_samples.item())
 
     def mean(self):
-        """returns the estimate of the mean."""
+        """ Returns the estimate of the mean. """
         return self.m
 
     def std(self):
@@ -129,7 +132,7 @@ class _InterruptExecution(Exception):
 
 class PerSampleBottleneck(nn.Module):
     """
-    The Per Sample Bottleneck provides attribution heatmaps for you model.
+    The Per Sample Bottleneck provides attribution heatmaps for your model.
 
     Example:
         ::
@@ -241,18 +244,19 @@ class PerSampleBottleneck(nn.Module):
 
     @staticmethod
     def _sample_z(mu, log_noise_var):
-        """ return mu with additive noise """
+        """ Return mu with additive noise """
         noise_std = (log_noise_var / 2).exp()
         eps = mu.data.new(mu.size()).normal_()
         return mu + noise_std * eps
 
     @staticmethod
-    def _calc_capacity(mu, log_var) -> torch.Tensor:
-        # KL[Q(z|x)||P(z)]
-        # 0.5 * (tr(noise_cov) + mu ^ T mu - k  -  log det(noise)
+    def _calc_capacity(mu, log_var):
+        """ Return the feature-wise KL-divergence of p(z|x) and q(z) """
         return -0.5 * (1 + log_var - mu**2 - log_var.exp())
 
     def _do_restrict_information(self, x):
+        """ Selectively remove information from x by applying noise """
+        
         # Smoothen and expand a on batch dimension
         lamb = self.sigmoid(self.alpha)
         lamb = lamb.expand(x.shape[0], x.shape[1], -1, -1)
@@ -262,7 +266,6 @@ class PerSampleBottleneck(nn.Module):
         x_norm = (x - self._mean) / self._std
 
         # Get sampling parameters
-
         var = (1 - lamb) ** 2
         log_var = torch.log(var)
         mu = x_norm * lamb
@@ -271,12 +274,15 @@ class PerSampleBottleneck(nn.Module):
         log_var = torch.clamp(log_var, -10, 10)
         z_norm = self._sample_z(mu, log_var)
         self.buffer_capacity = self._calc_capacity(mu, log_var) * self._active_neurons
-        # Denormalize z to match magnitude of x
+        
+        # Denormalize z to match original magnitude of x
         z = z_norm * self._std + self._mean
         z *= self._active_neurons
+        
         # Clamp output, if input was post-relu
         if self.relu:
             z = torch.clamp(z, 0.0)
+            
         return z
 
     @contextmanager
@@ -292,7 +298,8 @@ class PerSampleBottleneck(nn.Module):
             self._estimate = False
 
     def reset_estimate(self):
-        """Resets the estimator. Useful if the distribution changes. Which can happen if you
+        """
+        Resets the estimator. Useful if the distribution changes. Which can happen if you
         trained the model more.
         """
         self.estimator = WelfordEstimator(self.channels, self.height, self.width)
@@ -409,17 +416,17 @@ class PerSampleBottleneck(nn.Module):
         return self._current_heatmap(input_t.shape[2:])
 
     def capacity(self):
-        """returns a tensor with the currenct capacity from the last input.
-        Shape is ``(self.channels, self.height, self.width)``"""
+        """ Returns a tensor with the currenct capacity from the last input.
+        Shape is ``(self.channels, self.height, self.width)`` """
         return self.buffer_capacity[0]
 
     def _current_heatmap(self, shape=None):
-        # Read bottleneck
+        """ Return a 2D-heatmap of flowing information. Optionally resize the map to match a certain shape """
         heatmap = _to_np(self.buffer_capacity[0])
         heatmap = np.nansum(heatmap, 0) / float(np.log(2))
         if shape is not None:
             ho, wo = heatmap.shape
             h, w = shape
-            # scale bit to the pixels
+            # Scale bits to the pixels
             heatmap *= (ho*wo) / (h*w)
             return resize(heatmap, shape, order=1, preserve_range=True)
