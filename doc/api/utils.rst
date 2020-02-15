@@ -1,7 +1,7 @@
 
-per_sample_bottleneck.utils
+iba.utils
 ===========================
 
-.. automodule:: per_sample_bottleneck.utils
+.. automodule:: iba.utils
     :members:
     :show-inheritance:

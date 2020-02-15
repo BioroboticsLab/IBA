@@ -1,13 +1,13 @@
 import setuptools
 
 setuptools.setup(
-    name="per-sample-bottleneck",
+    name="iba",
     version="0.0.1",
-    author="Anonymous",
+    author="Karl Schulz, Leon Sixt",
     author_email="",
     license='MIT',
     description="Implementation of the Attribution Bottleneck",
-    packages=setuptools.find_namespace_packages(include=['per_sample_bottleneck.*']),
+    packages=setuptools.find_namespace_packages(include=['iba.*']),
     install_requires=['torch', 'numpy', 'scikit-image'],
     python_requires='>=3.6',
     keywords=['Deep Learning', 'Attribution'],
