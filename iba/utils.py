@@ -4,6 +4,67 @@ import torch
 from collections import OrderedDict
 
 
+class WelfordEstimator:
+    """
+    Estimates the mean and standard derivation.
+    For the algorithm see ``https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance``.
+    Args:
+        channels: The number of channels of the feature map
+        height: The heigth of the feature map
+        width: The width of the feature map
+    Example:
+        Given a batch of images ``imgs`` with shape ``(10, 3, 64, 64)``, the mean and std could
+        be estimated as follows::
+            imgs = torch.randn(10, 3, 64, 64)
+            estim = WelfordEstimator(3, 64, 64)
+            estim(imgs)
+            # returns the estimated mean
+            estim.mean()
+            # returns the estimated std
+            estim.std()
+            # returns the number of samples, here 10
+            estim.n_samples()
+            # returns a mask with active neurons
+            estim.active_neurons()
+    """
+    def __init__(self, height, width, channels):
+        super().__init__()
+        shape = (1, height, width, channels)
+        self.m = np.zeros(shape)
+        self.s = np.zeros(shape)
+        self._n_samples = 0
+        self._neuron_nonzero = np.zeros(shape, dtype='long')
+
+    def fit(self, x):
+        """ Update estimates without altering x """
+        for xi in x:
+            self._neuron_nonzero += (xi != 0.)
+            old_m = self.m.copy()
+            self.m = self.m + (xi-self.m) / (self._n_samples + 1)
+            self.s = self.s + (xi-self.m) * (xi-old_m)
+            self._n_samples += 1
+        return x
+
+    def n_samples(self):
+        """ Returns the number of seen samples. """
+        return int(self._n_samples.item())
+
+    def mean(self):
+        """ Returns the estimate of the mean. """
+        return self.m
+
+    def std(self):
+        """returns the estimate of the standard derivation."""
+        return np.sqrt(self.s / (self._n_samples - 1))
+
+    def active_neurons(self, threshold=0.01):
+        """
+        Returns a mask of all active neurons.
+        A neuron is considered active if ``n_nonzero / n_samples  > threshold``
+        """
+        return (self._neuron_nonzero.astype(np.float32) / self._n_samples) > threshold
+
+
 def get_output_shapes(model, input_t, layer_type=None):
     """Returns a dictionary from ``module_nam`` to output shape. Helpful to figure out the
     shape of the bottleneck."""
