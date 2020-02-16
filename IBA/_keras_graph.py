@@ -57,10 +57,11 @@ import six
 
 
 import inspect
-import keras.backend as K
-import keras.engine.topology
-import keras.layers
-import keras.models
+from tensorflow import keras
+import tensorflow.keras.backend as K
+from tensorflow.keras.layers import Activation
+from tensorflow.keras.models import Model
+from tensorflow.python.keras.engine.network import Network
 import numpy as np
 
 
@@ -141,7 +142,7 @@ def is_network(layer):
     """
     Is network in network?
     """
-    return isinstance(layer, keras.engine.topology.Network)
+    return isinstance(layer, Network)
 
 ###############################################################################
 ###############################################################################
@@ -378,7 +379,7 @@ def pre_softmax_tensors(Xs, should_find_softmax=True):
         layer, node_index, tensor_index = x._keras_history
         if contains_activation(layer, activation="softmax"):
             softmax_found = True
-            if isinstance(layer, keras.layers.Activation):
+            if isinstance(layer, Activation):
                 ret.append(layer.get_input_at(node_index))
             else:
                 layer_wo_act = copy_layer_wo_activation(layer)
@@ -506,7 +507,7 @@ def trace_model_execution(model, reapply_on_copied_layers=False):
                 setattr(layer, "call", patch(layer, getattr(layer, "call")))
 
             # Trigger reapplication of model.
-            model_copy = keras.models.Model(inputs=model.inputs,
+            model_copy = Model(inputs=model.inputs,
                                             outputs=model.outputs)
             outputs = to_list(model_copy(model.inputs))
         finally:
