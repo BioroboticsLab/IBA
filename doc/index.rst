@@ -5,7 +5,7 @@ Welcome to per-sample-bottleneck's documentation!
    :caption: Contents:
    :maxdepth: 2
 
-   api/per_sample_bottleneck
+   api/iba_pytorch
    api/utils
 
 

@@ -1,8 +1,8 @@
 #! /usr/bin/env bash
 
 w="a-zA-Z0-9_\."
-from=$(find ../per_sample_bottleneck -name "*.py" | xargs cat  |  sed -n "s/^from \([$w]*\) .*$/\1/p")
-import=$(find ../per_sample_bottleneck -name "*.py" | xargs cat  | sed -n "s/^import \([$w]*\).*/\1/p")
+from=$(find ../iba -name "*.py" | xargs cat  |  sed -n "s/^from \([$w]*\) .*$/\1/p")
+import=$(find ../iba -name "*.py" | xargs cat  | sed -n "s/^import \([$w]*\).*/\1/p")
 
 echo "["
 for m in $from $import; do

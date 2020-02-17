@@ -27,7 +27,7 @@ def get_modules():
     p = subprocess.Popen(get_imports, cwd=cwd, stdout=subprocess.PIPE)
     stdout, stderr = p.communicate()
     modules = json.loads(stdout.decode('utf-8'))[:-1]
-    modules = [m for m in modules if not m.startswith('per_sample_bottleneck')]
+    modules = [m for m in modules if not m.startswith('iba')]
     mock_modules = []
     for module in modules:
         try:
@@ -73,7 +73,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'per_sample_bottleneck'
+project = u'iba'
 copyright = ''
 author = 'anoynomous'
 
@@ -249,7 +249,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'per_sample_bottleneck.tex', u'Documentation',
+    (master_doc, 'iba.tex', u'Documentation',
      u'', 'manual'),
 ]
 
@@ -279,7 +279,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'per_sample_bottleneck', u'Per-Sample Bottleneck Documentation',
+    (master_doc, 'iba', u'IBA Documentation',
      [author], 1)
 ]
 
@@ -293,8 +293,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'per_sample_bottleneck', u'Documentation',
-     author, 'per_sample_bottleneck', 'One line description of project.',
+    (master_doc, 'iba', u'Documentation',
+     author, 'iba', 'One line description of project.',
      'Miscellaneous'),
 ]
 
@@ -332,7 +332,7 @@ def linkcode_resolve(domain, info):
     """
     import inspect
     from os.path import relpath, dirname
-    import per_sample_bottleneck
+    import iba
     import subprocess
     if domain != 'py':
         return None
@@ -368,8 +368,8 @@ def linkcode_resolve(domain, info):
     else:
         linespec = ""
 
-    fn = relpath(fn, start=dirname(per_sample_bottleneck.__file__))
+    fn = relpath(fn, start=dirname(iba.__file__))
     p = subprocess.Popen(['git', 'rev-parse', 'HEAD'], stdout=subprocess.PIPE)
     git_rev, err = p.communicate()
     git_rev = git_rev.decode('utf-8').rstrip('\n')
-    return "https://github.com/attribution-bottleneck/per_sample_bottleneck/blob/{}/per_sample_bottleneck/{}{}".format(git_rev, fn, linespec)
+    return "https://github.com/attribution-bottleneck/IBA/blob/{}/iba/{}{}".format(git_rev, fn, linespec)

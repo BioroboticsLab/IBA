@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from skimage.transform import resize
 
 
+# Helper Function
+
 def _to_np(t: torch.Tensor):
     t = t.detach()
     if t.is_cuda:
@@ -14,8 +16,62 @@ def _to_np(t: torch.Tensor):
     return t.numpy()
 
 
+def denormalize(img, method='imagenet'):
+    """
+    Reverses the preprocessing for imagenet.
+    """
+    if type(img) == torch.Tensor:
+        if len(img.shape) == 3:
+            img = img.cpu().numpy()
+            if img.shape[0] == 3:
+                img = img.transpose(1, 2, 0)
+            elif img.shape[0] == 1:
+                img = img[0]
+            else:
+                raise ValueError('torch images must have 1 or 3 channels. Got {}'
+                                 .format(img.shape[0]))
+        elif len(img.shape) == 2:
+            img = img.cpu().numpy()
+        else:
+            raise ValueError('torch images must have 2 or 3 dimensions. Got shape {}'
+                             .format(img.shape))
+    assert method == 'imagenet'
+    mean3 = [0.485, 0.456, 0.406]
+    std3 = [0.229, 0.224, 0.225]
+    mean1 = [0.5]
+    std1 = [0.5]
+    mean, std = (mean3, std3) if img.shape[2] == 3 else (mean1, std1)
+    for d in range(len(mean)):
+        img[:, :, d] += mean[d]
+        if np.max(img) > 1:
+            img = img / np.max(img)  # force max 1
+    return img
+
+
+def _to_np_img(img: torch.Tensor, denorm=False):
+    """
+
+    """
+    # force 2-3 dims
+    if len(img.shape) == 4:
+        img = img[0]
+    # tensor to np
+    if isinstance(img, torch.Tensor):
+        img = img.detach()
+        if img.is_cuda:
+            img = img.cpu()
+        img = img.numpy()
+    # if color is not last
+    if len(img.shape) > 2 and img.shape[0] < img.shape[2]:
+        img = np.swapaxes(np.swapaxes(img, 2, 0), 1, 0)
+    if denorm:
+        img = denormalize(img)
+    return img
+
+
+
 def insert_into_sequential(sequential, layer, idx):
-    """ 
+    """
     Returns a ``nn.Sequential`` with ``layer`` inserted in ``sequential`` at position ``idx``.
     """
     children = list(sequential.children())
@@ -256,7 +312,7 @@ class PerSampleBottleneck(nn.Module):
 
     def _do_restrict_information(self, x):
         """ Selectively remove information from x by applying noise """
-        
+
         # Smoothen and expand a on batch dimension
         lamb = self.sigmoid(self.alpha)
         lamb = lamb.expand(x.shape[0], x.shape[1], -1, -1)
@@ -271,18 +327,18 @@ class PerSampleBottleneck(nn.Module):
         mu = x_norm * lamb
 
         # Sample new output values from p(z|x)
-        log_var = torch.clamp(log_var, -10, 10)
-        z_norm = self._sample_z(mu, log_var)
+        eps = mu.data.new(mu.size()).normal_()
+        z_norm =  x_norm * lamb + (1-lamb) * eps
         self.buffer_capacity = self._calc_capacity(mu, log_var) * self._active_neurons
-        
+
         # Denormalize z to match original magnitude of x
         z = z_norm * self._std + self._mean
         z *= self._active_neurons
-        
+
         # Clamp output, if input was post-relu
         if self.relu:
             z = torch.clamp(z, 0.0)
-            
+
         return z
 
     @contextmanager
@@ -331,6 +387,7 @@ class PerSampleBottleneck(nn.Module):
             device = next(iter(model.parameters())).device
         if reset:
             self.reset_estimate()
+        self.estimator.to(device)
         for batch in dataloader:
             imgs = batch[0]
             if self.estimator.n_samples() > n_samples:
@@ -402,6 +459,9 @@ class PerSampleBottleneck(nn.Module):
         self._active_neurons = self.estimator.active_neurons(active_neurons_threshold).float()
         self._std = torch.max(std, self.min_std*torch.ones_like(std))
 
+        self._loss = []
+        self._model_loss = []
+        self._information_loss = []
         with self.supress_information():
             for _ in tqdm(range(optimization_steps), desc="Training Bottleneck",
                           disable=not self.progbar):
@@ -412,6 +472,10 @@ class PerSampleBottleneck(nn.Module):
                 loss = model_loss + beta * information_loss
                 loss.backward()
                 optimizer.step()
+
+                self._loss.append(loss.item())
+                self._model_loss.append(model_loss.item())
+                self._information_loss.append(information_loss.item())
 
         return self._current_heatmap(input_t.shape[2:])
 
