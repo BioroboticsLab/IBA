@@ -5,70 +5,10 @@ import warnings
 from tqdm import tqdm
 from contextlib import contextmanager
 from skimage.transform import resize
+from torchvision.transforms import Normalize, Compose
 
 
-# Helper Function
-
-def _to_np(t: torch.Tensor):
-    t = t.detach()
-    if t.is_cuda:
-        t = t.cpu()
-    return t.numpy()
-
-
-def denormalize(img, method='imagenet'):
-    """
-    Reverses the preprocessing for imagenet.
-    """
-    if type(img) == torch.Tensor:
-        if len(img.shape) == 3:
-            img = img.cpu().numpy()
-            if img.shape[0] == 3:
-                img = img.transpose(1, 2, 0)
-            elif img.shape[0] == 1:
-                img = img[0]
-            else:
-                raise ValueError('torch images must have 1 or 3 channels. Got {}'
-                                 .format(img.shape[0]))
-        elif len(img.shape) == 2:
-            img = img.cpu().numpy()
-        else:
-            raise ValueError('torch images must have 2 or 3 dimensions. Got shape {}'
-                             .format(img.shape))
-    assert method == 'imagenet'
-    mean3 = [0.485, 0.456, 0.406]
-    std3 = [0.229, 0.224, 0.225]
-    mean1 = [0.5]
-    std1 = [0.5]
-    mean, std = (mean3, std3) if img.shape[2] == 3 else (mean1, std1)
-    for d in range(len(mean)):
-        img[:, :, d] += mean[d]
-        if np.max(img) > 1:
-            img = img / np.max(img)  # force max 1
-    return img
-
-
-def _to_np_img(img: torch.Tensor, denorm=False):
-    """
-
-    """
-    # force 2-3 dims
-    if len(img.shape) == 4:
-        img = img[0]
-    # tensor to np
-    if isinstance(img, torch.Tensor):
-        img = img.detach()
-        if img.is_cuda:
-            img = img.cpu()
-        img = img.numpy()
-    # if color is not last
-    if len(img.shape) > 2 and img.shape[0] < img.shape[2]:
-        img = np.swapaxes(np.swapaxes(img, 2, 0), 1, 0)
-    if denorm:
-        img = denormalize(img)
-    return img
-
-
+# Helper Functions
 
 def insert_into_sequential(sequential, layer, idx):
     """
@@ -78,6 +18,15 @@ def insert_into_sequential(sequential, layer, idx):
     children.insert(idx, layer)
     return nn.Sequential(*children)
 
+def tensor_to_np_img(img_t):
+    """
+    Convert a torch tensor of shape ``(c, h, w)`` to a numpy array of shape ``(h, w, c)``
+    and reverse the torchvision prepocessing.
+    """
+    return Compose([
+        Normalize(mean=[0, 0, 0], std=[1 / 0.229, 1 / 0.224, 1 / 0.225]),
+        Normalize(std=[1, 1, 1], mean=[-0.485, -0.456, -0.406]),
+    ])(img_t).detach().cpu().numpy().transpose(1, 2, 0)
 
 class SpatialGaussianKernel(nn.Module):
     """ A simple convolutional layer with fixed gaussian kernels, used to smoothen the input """
@@ -90,7 +39,7 @@ class SpatialGaussianKernel(nn.Module):
         variance = sigma ** 2.
         x_cord = torch.arange(kernel_size, dtype=torch.float)
         x_grid = x_cord.repeat(kernel_size).view(kernel_size, kernel_size)
-        y_grid = x_grid.t()  # 1, 1, 1 \ 2, 2, 2 \ 3, 3, 3
+        y_grid = x_grid.t()
         xy_grid = torch.stack([x_grid, y_grid], dim=-1)
         mean_xy = (kernel_size - 1) / 2.
         kernel_2d = (1. / (2. * np.pi * variance)) * torch.exp(
@@ -106,7 +55,7 @@ class SpatialGaussianKernel(nn.Module):
         self.conv.weight.requires_grad = False
         self.pad = nn.ReflectionPad2d(int((kernel_size - 1) / 2))
 
-    def parameters(self):
+    def parameters(self, **kwargs):
         """returns no parameters"""
         return []
 
@@ -186,7 +135,7 @@ class _InterruptExecution(Exception):
     pass
 
 
-class PerSampleBottleneck(nn.Module):
+class IBA(nn.Module):
     """
     The Per Sample Bottleneck provides attribution heatmaps for your model.
 
@@ -380,9 +329,9 @@ class PerSampleBottleneck(nn.Module):
         except ImportError:
             progbar = False
         if progbar == 'notebook':
-            dataloader = tqdm.tqdm_notebook(dataloader)
+            dataloader = tqdm.tqdm_notebook(dataloader, total=n_samples//dataloader.batch_size)
         elif progbar:
-            dataloader = tqdm.tqdm(dataloader)
+            dataloader = tqdm.tqdm(dataloader, total=n_samples//dataloader.batch_size)
         if device is None:
             device = next(iter(model.parameters())).device
         if reset:
@@ -414,7 +363,6 @@ class PerSampleBottleneck(nn.Module):
             self._supress_information = False
 
     def heatmap(self, input_t, model_loss_fn,
-                estimator='auto',
                 beta=None, min_std=None, optimization_steps=None,
                 lr=None, batch_size=None, initial_alpha=None, active_neurons_threshold=0.01):
         """
@@ -486,7 +434,7 @@ class PerSampleBottleneck(nn.Module):
 
     def _current_heatmap(self, shape=None):
         """ Return a 2D-heatmap of flowing information. Optionally resize the map to match a certain shape """
-        heatmap = _to_np(self.buffer_capacity[0])
+        heatmap = self.buffer_capacity[0].detach().cpu().numpy()
         heatmap = np.nansum(heatmap, 0) / float(np.log(2))
         if shape is not None:
             ho, wo = heatmap.shape
