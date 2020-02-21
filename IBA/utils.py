@@ -2,12 +2,10 @@ import numpy as np
 
 from collections import OrderedDict
 
-
 # this module should be independent of torch and tensorflow
 assert 'torch' not in globals()
 assert 'tf' not in globals()
 assert 'tensorflow' not in globals()
-
 
 class WelfordEstimator:
     """
@@ -52,7 +50,7 @@ class WelfordEstimator:
 
     def n_samples(self):
         """ Returns the number of seen samples. """
-        return int(self._n_samples.item())
+        return self._n_samples
 
     def mean(self):
         """ Returns the estimate of the mean. """
@@ -94,29 +92,6 @@ def get_output_shapes(model, input_t, layer_type=None):
     return sizes
 
 
-def _set_absmax(hmap, absmax=1.0):
-    """ set the maximal amplitude below or above zero """
-    current_absmax = max(abs(hmap.max()), abs(hmap.min()))
-    if current_absmax:  # dont divide by 0
-        scale = 1 / current_absmax * absmax
-        return hmap * scale
-    else:
-        print("WARNING current_absmax == 0! mean {}, max {}, min {}, std {}",
-              hmap.mean(), hmap.max(), hmap.min())
-        return hmap
-
-
-def _to_rgb(img):
-    """Converts a gray scale image to an RGB image """
-    if len(img.shape) == 2:
-        return np.stack((img, img, img), axis=2)
-    elif img.shape[2] == 1:
-        return np.dstack((img, img, img))
-    else:
-        # nothing to do
-        return img
-
-
 def plot_heatmap(heatmap, img=None, ax=None, label='Bits / Pixel',
                  min_alpha=0.2, max_alpha=0.7, vmax=None,
                  colorbar_size=0.3, colorbar_pad=0.08):
@@ -125,8 +100,8 @@ def plot_heatmap(heatmap, img=None, ax=None, label='Bits / Pixel',
     Plots the heatmap with an bits/pixel colorbar and optionally overlays the image.
 
     Args:
-        heatmap: the heatmap
-        img: show this image
+        heatmap: np.ndarray the heatmap
+        img: np.ndarray show this image under the heatmap
         ax: matplotlib axis. If ``None``, a new plot is created
         label: label for the colorbar
         min_alpha: minimum alpha value for the overlay. only used if ``img`` is given
@@ -146,7 +121,9 @@ def plot_heatmap(heatmap, img=None, ax=None, label='Bits / Pixel',
         fig, ax = plt.subplots(1, 1, figsize=(5.5, 4.0))
 
     if img is not None:
-        ax.imshow(_to_rgb(denormalize(_to_np_img(img)).mean(2)))
+        # Underlay the image as greyscale
+        grey = img.mean(2)
+        ax.imshow(np.stack((grey, grey, grey), axis=2))
 
     ax1_divider = make_axes_locatable(ax)
     if type(colorbar_size) == float:
@@ -158,7 +135,7 @@ def plot_heatmap(heatmap, img=None, ax=None, label='Bits / Pixel',
         vmax = heatmap.max()
     norm = mpl.colors.Normalize(vmin=0, vmax=vmax)
     n = 256
-    half_jet_rgba = plt.cm.jet(np.linspace(0.5, 1, n))
+    half_jet_rgba = plt.cm.seismic(np.linspace(0.5, 1, n))
     half_jet_rgba[:, -1] = np.linspace(0.2, 1, n)
     cmap = mpl.colors.ListedColormap(half_jet_rgba)
     hmap_jet = cmap(norm(heatmap))
