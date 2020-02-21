@@ -8,10 +8,10 @@ A short usage-description:
 
 ```python
 # Create the Per-Sample Bottleneck:
-btln = PerSampleBottleneck(channels, height, width)
+btln = IBA()
 
 # Add it to your model
-model.conv4 = nn.Sequential(model.conv4, btln)
+btln.attach(model.conv4)
 
 # Estimate the mean and variance.
 btln.estimate(model, datagen)

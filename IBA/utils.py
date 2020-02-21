@@ -32,14 +32,21 @@ class WelfordEstimator:
     """
     def __init__(self, height, width, channels):
         super().__init__()
-        shape = (1, height, width, channels)
+        self.m = None
+        self.s = None
+        self._n_samples = 0
+        self._neuron_nonzero = None
+
+    def _init(self, shape):
         self.m = np.zeros(shape)
         self.s = np.zeros(shape)
-        self._n_samples = 0
         self._neuron_nonzero = np.zeros(shape, dtype='long')
 
     def fit(self, x):
         """ Update estimates without altering x """
+        if self._n_samples == 0:
+            # Initialize on first datapoint
+            self._init(x.shape[-3:])
         for xi in x:
             self._neuron_nonzero += (xi != 0.)
             old_m = self.m.copy()
@@ -66,30 +73,6 @@ class WelfordEstimator:
         A neuron is considered active if ``n_nonzero / n_samples  > threshold``
         """
         return (self._neuron_nonzero.astype(np.float32) / self._n_samples) > threshold
-
-
-def get_output_shapes(model, input_t, layer_type=None):
-    """Returns a dictionary from ``module_nam`` to output shape. Helpful to figure out the
-    shape of the bottleneck."""
-    if layer_type is None:
-        layer_type = object
-    sizes = OrderedDict()
-
-    def save_output_shape(name):
-        def wrapper(m, ins, outs):
-            sizes[name] = outs[0].shape
-        return wrapper
-
-    hooks = []
-    for name, layer in model.named_modules():
-        if isinstance(layer, layer_type):
-            hooks.append(layer.register_forward_hook(save_output_shape(name)))
-
-    _ = model(input_t)
-
-    for hook in hooks:
-        hook.remove()
-    return sizes
 
 
 def plot_heatmap(heatmap, img=None, ax=None, label='Bits / Pixel',
