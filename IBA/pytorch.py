@@ -63,15 +63,10 @@ class SpatialGaussianKernel(nn.Module):
         return self.conv(self.pad(x))
 
 
-class WelfordEstimator(nn.Module):
+class TorchWelfordEstimator(nn.Module):
     """
     Estimates the mean and standard derivation.
     For the algorithm see ``https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance``.
-
-    Args:
-        channels: The number of channels of the feature map
-        height: The heigth of the feature map
-        width: The width of the feature map
 
     Example:
         Given a batch of images ``imgs`` with shape ``(10, 3, 64, 64)``, the mean and std could
@@ -93,16 +88,21 @@ class WelfordEstimator(nn.Module):
             # returns a mask with active neurons
             estim.active_neurons()
     """
-    def __init__(self, channels, height, width):
+    def __init__(self):
         super().__init__()
-        self.register_buffer('m', torch.zeros(channels, height, width))
-        self.register_buffer('s', torch.zeros(channels, height, width))
         self.register_buffer('_n_samples', torch.tensor([0], dtype=torch.long))
-        self.register_buffer('_neuron_nonzero', torch.zeros(channels, height, width,
-                                                            dtype=torch.long))
+
+    def _init(self, shape, device):
+        self.register_buffer('m', torch.zeros(*shape))
+        self.register_buffer('s', torch.zeros(*shape))
+        self.register_buffer('_neuron_nonzero', torch.zeros(*shape, dtype=torch.long))
+        self.to(device)
 
     def forward(self, x):
         """ Update estimates without altering x """
+        if self._n_samples.item() == 0:
+            # Initialize runnnig mean and std on first datapoint
+            self._init(x.shape[-3:], x.device)
         for xi in x:
             self._neuron_nonzero += (xi != 0.).long()
             old_m = self.m.clone()
@@ -157,9 +157,6 @@ class IBA(nn.Module):
             ```
 
     Args:
-        channels: C form an input of size `(N, C, H, W)`
-        height: H form an input of size `(N, C, H, W)`
-        width: W form an input of size `(N, C, H, W)`
         sigma: The standard deviation of the gaussian kernel to smooth
             the mask, or None for no smoothing
         beta: weighting of model loss and mean information loss.
@@ -169,9 +166,6 @@ class IBA(nn.Module):
         initial_alpha: initial value for the parameter.
     """
     def __init__(self,
-                 channels,
-                 height,
-                 width,
                  sigma=1.,
                  beta=10,
                  min_std=0.01,
@@ -182,9 +176,6 @@ class IBA(nn.Module):
                  progbar=False,
                  relu=False):
         super().__init__()
-        self.channels = channels
-        self.height = height
-        self.width = width
         self.relu = relu
         self.beta = beta
         self.min_std = min_std
@@ -192,29 +183,63 @@ class IBA(nn.Module):
         self.lr = lr
         self.batch_size = batch_size
         self.initial_alpha = initial_alpha
-        self.alpha = nn.Parameter(initial_alpha * torch.ones(channels, height, width))
+        self.alpha = None  # Initialized on first forward pass
         self.progbar = progbar
         self.sigmoid = nn.Sigmoid()
         self.buffer_capacity = None  # Filled on forward pass, used for loss
-        if sigma is not None and sigma > 0:
-            # Construct static conv layer with gaussian kernel
-            kernel_size = int(round(2 * sigma)) * 2 + 1  # Cover 2.5 stds in both directions
-            self.smooth = SpatialGaussianKernel(kernel_size, sigma, channels)
-        else:
-            self.smooth = None
-        self.estimator = WelfordEstimator(channels, height, width)
+        self.sigma = sigma
+        self.estimator = TorchWelfordEstimator()
+        self.device = None
         self._estimate = False
         self._mean = None
         self._std = None
         self._active_neurons = None
         self._supress_information = False
         self._interrupt_execution = False
+        self._hook_handle = False
 
-    def _reset_alpha(self, initial_alpha=None):
+    def _reset_alpha(self):
         """ Used to reset the mask to train on another sample """
+        if self.alpha is None:
+            self._init()
         with torch.no_grad():
-            self.alpha.fill_(initial_alpha or self.initial_alpha)
-        return self.alpha
+            self.alpha.fill_(self.initial_alpha)
+
+    def _init(self):
+        if self.estimator.n_samples() <= 0:
+            raise RuntimeWarning("You need to estimate the feature distribution before using the bottleneck.")
+        shape = self.estimator.mean().shape
+        device = self.estimator.mean().device
+        self.alpha = nn.Parameter(torch.full(shape, self.initial_alpha, device=device), requires_grad=True)
+        if self.sigma is not None and self.sigma > 0:
+            # Construct static conv layer with gaussian kernel
+            kernel_size = int(round(2 * self.sigma)) * 2 + 1  # Cover 2.5 stds in both directions
+            self.smooth = SpatialGaussianKernel(kernel_size, self.sigma, shape[0]).to(device)
+        else:
+            self.smooth = None
+
+    def attach(self, layer: nn.Module):
+        """ Attach the bottleneck after a model layer to restrict the information flow """
+        try:
+            from packaging import version
+            if version.parse(torch.__version__) < version.parse("1.2"):
+                raise RuntimeWarning("IBA.attach() cannot be used with your version of torch: Forward hooks are only "
+                                     "allowed to modify the output in torch >= 1.2. Please upgrade torch or resort to "
+                                     "adding the IBA layer into the model directly as: model.layer = "
+                                     "nn.Sequential(model.layer, iba_layer)")
+        finally:
+            pass  # do not complain if packaging is not installed
+        def bottleneck_pass(module, inputs, outputs):
+            return self(outputs)
+        if self._hook_handle:
+            raise RuntimeWarning("You cannot attach the bottleneck twice.")
+        self._hook_handle = layer.register_forward_hook(bottleneck_pass)
+
+    def detach(self):
+        """ Remove the bottleneck to restore the original model """
+        if self._hook_handle:
+            self._hook_handle.remove()
+            self._hook_handle = None
 
     def forward(self, x):
         if self._supress_information:
@@ -261,8 +286,10 @@ class IBA(nn.Module):
 
     def _do_restrict_information(self, x):
         """ Selectively remove information from x by applying noise """
+        if self.alpha is None:
+            raise RuntimeWarning("Alpha not initialized. Run _init() before using the bottleneck.")
 
-        # Smoothen and expand a on batch dimension
+        # Smoothen and expand alpha on batch dimension
         lamb = self.sigmoid(self.alpha)
         lamb = lamb.expand(x.shape[0], x.shape[1], -1, -1)
         lamb = self.smooth(lamb) if self.smooth is not None else lamb
@@ -277,7 +304,7 @@ class IBA(nn.Module):
 
         # Sample new output values from p(z|x)
         eps = mu.data.new(mu.size()).normal_()
-        z_norm =  x_norm * lamb + (1-lamb) * eps
+        z_norm = x_norm * lamb + (1-lamb) * eps
         self.buffer_capacity = self._calc_capacity(mu, log_var) * self._active_neurons
 
         # Denormalize z to match original magnitude of x
@@ -307,7 +334,7 @@ class IBA(nn.Module):
         Resets the estimator. Useful if the distribution changes. Which can happen if you
         trained the model more.
         """
-        self.estimator = WelfordEstimator(self.channels, self.height, self.width)
+        self.estimator = TorchWelfordEstimator()
 
     def estimate(self, model, dataloader, device=None, n_samples=10000, progbar=False, reset=True):
         """ Estimate mean and variance using the welford estimator.
@@ -336,7 +363,6 @@ class IBA(nn.Module):
             device = next(iter(model.parameters())).device
         if reset:
             self.reset_estimate()
-        self.estimator.to(device)
         for batch in dataloader:
             imgs = batch[0]
             if self.estimator.n_samples() > n_samples:
@@ -363,8 +389,8 @@ class IBA(nn.Module):
             self._supress_information = False
 
     def heatmap(self, input_t, model_loss_fn,
-                beta=None, min_std=None, optimization_steps=None,
-                lr=None, batch_size=None, initial_alpha=None, active_neurons_threshold=0.01):
+                beta=None, optimization_steps=None,
+                lr=None, batch_size=None, active_neurons_threshold=0.01):
         """
         Generates a heatmap for a given sample. Make sure you estimated mean and variance of the
         input distribution.
@@ -372,13 +398,10 @@ class IBA(nn.Module):
         Args:
             input_t: input image of shape (1, C, H W)
             model_loss_fn: closure evaluating the model
-            estimator: either `auto`,`welford`, or `running`. `auto` picks
-                `welford` if available otherwise `running`.
             beta: if not None, overrides the bottleneck beta value
-            beta: if not None, overrides the bottleneck min_std value
+            optimization_steps: if not None, overrides the bottleneck optimization_steps value
             lr: if not None, overrides the bottleneck lr value
             batch_size: if not None, overrides the bottleneck batch_size value
-            initial_alpha: if not None, overrides the bottleneck initial_alpha value
             active_neurons_threshold: used threshold to determine if a neuron is active
 
         Returns:
@@ -387,7 +410,6 @@ class IBA(nn.Module):
         assert input_t.shape[0] == 1, "We can only fit one sample a time"
 
         beta = beta or self.beta
-        min_std = min_std or self.min_std
         optimization_steps = optimization_steps or self.optimization_steps
         lr = lr or self.lr
         batch_size = batch_size or self.batch_size
@@ -395,13 +417,12 @@ class IBA(nn.Module):
         batch = input_t.expand(batch_size, -1, -1, -1)
 
         # Reset from previous run or modifications
-        self._reset_alpha(initial_alpha)
+        self._reset_alpha()
         optimizer = torch.optim.Adam(lr=lr, params=[self.alpha])
 
         if self.estimator.n_samples() < 1000:
-            warnings.warn("Selected estimator was only fitted on {} samples. "
-                          "Might not be enough! We recommend 10.000 samples."
-                          .format(self.estimator.n_samples()))
+            warnings.warn(f"Selected estimator was only fitted on {self.estimator.n_samples()} "
+                          f"samples. Might not be enough! We recommend 10.000 samples.")
         self._mean = self.estimator.mean()
         std = self.estimator.std()
         self._active_neurons = self.estimator.active_neurons(active_neurons_threshold).float()
@@ -415,7 +436,7 @@ class IBA(nn.Module):
                           disable=not self.progbar):
                 optimizer.zero_grad()
                 model_loss = model_loss_fn(batch)
-                # Taking the mean is equivalent of scaling with 1/K
+                # Taking the mean is equivalent of scaling the sum with 1/K
                 information_loss = self.buffer_capacity.mean()
                 loss = model_loss + beta * information_loss
                 loss.backward()

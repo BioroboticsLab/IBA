@@ -8,7 +8,7 @@ setuptools.setup(
     license='MIT',
     description="Implementation of the Attribution Bottleneck",
     packages=setuptools.find_namespace_packages(include=['iba.*']),
-    install_requires=['torch', 'numpy', 'scikit-image'],
+    install_requires=['numpy', 'scikit-image'],
     python_requires='>=3.6',
     keywords=['Deep Learning', 'Attribution'],
 )
