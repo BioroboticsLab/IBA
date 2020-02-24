@@ -18,16 +18,20 @@ class IBA_Readout(IBA):
     - additional hooks to collect the input and the feature maps in the nested pass
     - a readout network of three 1x1 conv. layers to yield alpha
     """
-    def __init__(self, layers, model, **kwargs):
+    def __init__(self, readout_layers, model, **kwargs):
         super().__init__(**kwargs)
-        self.layers = layers
+        self.layers = readout_layers
         self.model = model  # used for the nested pass
-        self._readout_estimators = [TorchWelfordEstimator() for _ in layers]
-        self._readout_values = [None for _ in layers]  # The recorded intermediate activations
-        self._readout_hooks = [None for _ in layers]  # Registered hooks
+        self._readout_estimators = [TorchWelfordEstimator() for _ in readout_layers]
+        self._readout_values = [None for _ in readout_layers]  # The recorded intermediate activations
+        self._readout_hooks = [None for _ in readout_layers]  # Registered hooks
         self._input_hook = None  # To record the input
         self._last_input = None  # Used as input for the nested forward pass
         self._nested_pass = False
+
+        # Attach additional hooks to capture input and readout
+        self._attach_input_hook()
+        self._attach_readout_hooks()
 
     def _init(self):
         super()._init()
@@ -45,15 +49,6 @@ class IBA_Readout(IBA):
             self.conv3.weight *= 1e-3
         # Put weights on same device
         self.to(self.estimator.device)
-
-    def attach(self, layer: nn.Module):
-        """
-        Additional to the bottleneck hook, we need hooks for the input and to collect
-        feature maps of the other layers.
-        """
-        super().attach(layer)
-        self._attach_input_hook()
-        self._attach_readout_hooks()
 
     def detach(self):
         super().detach()
