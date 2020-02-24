@@ -161,6 +161,7 @@ class IBA(nn.Module):
             ```
 
     Args:
+        layer: The layer after which to inject the bottleneck
         sigma: The standard deviation of the gaussian kernel to smooth
             the mask, or None for no smoothing
         beta: weighting of model loss and mean information loss.
@@ -170,6 +171,7 @@ class IBA(nn.Module):
         initial_alpha: initial value for the parameter.
     """
     def __init__(self,
+                 layer=None,
                  sigma=1.,
                  beta=10,
                  min_std=0.01,
@@ -204,6 +206,25 @@ class IBA(nn.Module):
         self._interrupt_execution = False
         self._hook_handle = False
 
+        # Check if modifying forward hooks are supported by the current torch version
+        if layer is not None:
+            try:
+                from packaging import version
+                if version.parse(torch.__version__) < version.parse("1.2"):
+                    raise RuntimeWarning("IBA has to be manually injected into the model with your "
+                                         "version of torch: Forward hooks are only allowed to modify "
+                                         "the output in torch >= 1.2. Please upgrade torch or resort to "
+                                         "adding the IBA layer into the model directly as: model.any_layer = "
+                                         "nn.Sequential(model.any_layer, iba)")
+            finally:
+                pass  # Do not complain if packaging is not installed
+
+            # Attach the bottleneck after the model layer as forward hook
+            self._hook_handle = layer.register_forward_hook(lambda m, x, y: self(y))
+
+        else:
+            pass
+
     def _reset_alpha(self):
         """ Used to reset the mask to train on another sample """
         with torch.no_grad():
@@ -225,24 +246,6 @@ class IBA(nn.Module):
             self.smooth = SpatialGaussianKernel(kernel_size, self.sigma, shape[0]).to(device)
         else:
             self.smooth = None
-
-    def attach(self, layer: nn.Module):
-        """ Attach the bottleneck after a model layer to restrict the information flow """
-        try:
-            from packaging import version
-            if version.parse(torch.__version__) < version.parse("1.2"):
-                raise RuntimeWarning("IBA.attach() cannot be used with your version of torch: Forward hooks are only "
-                                     "allowed to modify the output in torch >= 1.2. Please upgrade torch or resort to "
-                                     "adding the IBA layer into the model directly as: model.any_layer = "
-                                     "nn.Sequential(model.any_layer, iba)")
-        finally:
-            pass  # do not complain if packaging is not installed
-
-        def bottleneck_pass(module, inputs, outputs):
-            return self(outputs)
-        if self._hook_handle:
-            raise RuntimeWarning("You cannot attach the bottleneck twice.")
-        self._hook_handle = layer.register_forward_hook(bottleneck_pass)
 
     def detach(self):
         """ Remove the bottleneck to restore the original model """
