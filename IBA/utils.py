@@ -30,7 +30,7 @@ class WelfordEstimator:
             # returns a mask with active neurons
             estim.active_neurons()
     """
-    def __init__(self, height, width, channels):
+    def __init__(self):
         super().__init__()
         self.m = None
         self.s = None
@@ -46,7 +46,7 @@ class WelfordEstimator:
         """ Update estimates without altering x """
         if self._n_samples == 0:
             # Initialize on first datapoint
-            self._init(x.shape[-3:])
+            self._init(x.shape[1:])
         for xi in x:
             self._neuron_nonzero += (xi != 0.)
             old_m = self.m.copy()
