@@ -37,16 +37,14 @@ class WelfordEstimator:
         self._n_samples = 0
         self._neuron_nonzero = None
 
-    def _init(self, shape):
-        self.m = np.zeros(shape)
-        self.s = np.zeros(shape)
-        self._neuron_nonzero = np.zeros(shape, dtype='long')
-
     def fit(self, x):
         """ Update estimates without altering x """
         if self._n_samples == 0:
             # Initialize on first datapoint
-            self._init(x.shape[1:])
+            shape = x.shape[1:]
+            self.m = np.zeros(shape)
+            self.s = np.zeros(shape)
+            self._neuron_nonzero = np.zeros(shape, dtype='long')
         for xi in x:
             self._neuron_nonzero += (xi != 0.)
             old_m = self.m.copy()
@@ -73,6 +71,20 @@ class WelfordEstimator:
         A neuron is considered active if ``n_nonzero / n_samples  > threshold``
         """
         return (self._neuron_nonzero.astype(np.float32) / self._n_samples) > threshold
+
+    def state_dict(self):
+        return {
+            'm': self.m,
+            's': self.s,
+            'n_samples': self._n_samples,
+            'neuron_nonzero': self._neuron_nonzero,
+        }
+
+    def load_state_dict(self, state):
+        self.m = state['m']
+        self.s = state['s']
+        self._n_samples = state['n_samples']
+        self._neuron_nonzero = state['neuron_nonzero']
 
 
 def plot_heatmap(heatmap, img=None, ax=None, label='Bits / Pixel',

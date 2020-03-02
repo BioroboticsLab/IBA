@@ -1,4 +1,6 @@
 # From https://github.com/albermax/innvestigate/blob/master/innvestigate/utils/keras/graph.py
+# small changes by Leon Sixt
+#
 #
 # COPYRIGHT
 #
@@ -57,11 +59,12 @@ import six
 
 
 import inspect
-from tensorflow import keras
-import tensorflow.keras.backend as K
-from tensorflow.keras.layers import Activation
-from tensorflow.keras.models import Model
-from tensorflow.python.keras.engine.network import Network
+
+import keras
+import keras.backend as K
+from keras.layers import Activation
+from keras.models import Model
+from keras.engine.network import Network
 import numpy as np
 
 
@@ -377,6 +380,7 @@ def pre_softmax_tensors(Xs, should_find_softmax=True):
     ret = []
     for x in Xs:
         layer, node_index, tensor_index = x._keras_history
+
         if contains_activation(layer, activation="softmax"):
             softmax_found = True
             if isinstance(layer, Activation):
