@@ -48,12 +48,11 @@ If you use this software for a scientific publication, please cite our paper:
 
 ```bibtex
 @inproceedings{
-anonymous2020restricting,
+Schulz2020Restricting,
 title={Restricting the Flow: Information Bottlenecks for Attribution},
-author={Anonymous},
-booktitle={Submitted to International Conference on Learning Representations},
+author={Karl Schulz and Leon Sixt and Federico Tombari and Tim Landgraf},
+booktitle={International Conference on Learning Representations},
 year={2020},
-url={https://openreview.net/forum?id=S1xWh1rYwB},
-note={under review}
+url={https://openreview.net/forum?id=S1xWh1rYwB}
 }
 ```
