@@ -1,7 +1,11 @@
 from collections import OrderedDict
 from contextlib import contextmanager
 
-import tensorflow.compat.v1 as tf
+try:
+    import tensorflow.compat.v1 as tf
+except ModuleNotFoundError:
+    import tensorflow as tf
+
 import tensorflow_probability as tfp
 
 import numpy as np
@@ -14,9 +18,6 @@ from IBA._keras_graph import _BatchSequence, contains_activation
 
 # expose for importing
 from IBA._keras_graph import model_wo_softmax   # noqa
-
-
-tf.disable_v2_behavior()
 
 
 class TFWelfordEstimator(WelfordEstimator):
