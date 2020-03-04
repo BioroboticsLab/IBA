@@ -23,12 +23,6 @@ from keras.applications import MobileNetV2
 from IBA.tensorflow_v1 import model_wo_softmax, IBACopyGraph, IBACopyGraphInnvestigate, IBALayer
 
 
-
-
-def simply_model():
-    pass
-
-
 INPUT_SHAPE = (96, 96, 3)
 
 

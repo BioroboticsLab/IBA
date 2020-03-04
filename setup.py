@@ -19,10 +19,10 @@ setuptools.setup(
             'torch'
         ],
         'tensorflow': [
-            'tensorflow'
+            'tensorflow>=1.12.0'
         ],
         'tensorflow-gpu': [
-            'tensorflow-gpu'
+            'tensorflow-gpu>=1.12.0'
         ],
     },
     python_requires='>=3.6',

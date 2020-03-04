@@ -51,17 +51,15 @@ from __future__ import\
     absolute_import, print_function, division, unicode_literals
 from builtins import range, zip
 import six
+import math
 
 
 ###############################################################################
 ###############################################################################
 ###############################################################################
 
-
-import inspect
 
 import keras
-import keras.backend as K
 from keras.layers import Activation
 from keras.models import Model
 from keras.engine.network import Network
@@ -88,9 +86,6 @@ __all__ = [
 
     "get_bottleneck_nodes",
     "get_bottleneck_tensors",
-
-    "ReverseMappingBase",
-    "reverse_model",
 ]
 
 
@@ -138,7 +133,6 @@ def contains_activation(layer, activation=None):
             return True
     else:
         return False
-
 
 
 def is_network(layer):
@@ -511,8 +505,7 @@ def trace_model_execution(model, reapply_on_copied_layers=False):
                 setattr(layer, "call", patch(layer, getattr(layer, "call")))
 
             # Trigger reapplication of model.
-            model_copy = Model(inputs=model.inputs,
-                                            outputs=model.outputs)
+            model_copy = Model(inputs=model.inputs, outputs=model.outputs)
             outputs = to_list(model_copy(model.inputs))
         finally:
             # Revert the monkey patches
@@ -818,7 +811,7 @@ class _BatchSequence(keras.utils.Sequence):
         if not self.single_tensor:
             for X in self.Xs[1:]:
                 assert X.shape[0] == self.Xs[0].shape[0]
-        super(BatchSequence, self).__init__()
+        super(_BatchSequence, self).__init__()
 
     def __len__(self):
         return int(math.ceil(float(len(self.Xs[0])) / self.batch_size))

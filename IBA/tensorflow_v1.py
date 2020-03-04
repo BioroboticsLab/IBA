@@ -322,7 +322,7 @@ class IBALayer(keras.layers.Layer):
         session = self._get_session(session)
         for epoch in range(epochs):
             for step, (imgs, targets) in enumerate(tqdm(
-                generator, disable=verbose, desc="[Fit Estimator #{}]".format(epoch))):
+                    generator, disable=verbose, desc="[Fit Estimator #{}]".format(epoch))):
                 feed_dict = {self._model.input: imgs}
                 self._estimator.fit(feed_dict, session=session)
                 if step + 1 >= steps_per_epoch:
@@ -694,7 +694,6 @@ class IBACopyGraphInnvestigate(IBACopyGraph, _InnvestigateAPI):
                               graph, session, copy_session_config)
         _InnvestigateAPI.__init__(self, model, neuron_selection_mode)
 
-
     def analyze(self, X, neuron_selection=None):
         if not hasattr(self, '_optimizer'):
             with self.copied_session_and_graph_as_default():
@@ -740,7 +739,7 @@ class IBACopyGraphInnvestigate(IBACopyGraph, _InnvestigateAPI):
         estimator_state = state.pop("estimator")
         feature_mean = state.pop("feature_mean")
         feature_std = state.pop("feature_std")
-        feature_name =  state.pop("feature_name")
+        feature_name = state.pop("feature_name")
         kwargs = super()._state_to_kwargs(state)
         kwargs['feature_name'] = feature_name
 

@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from decorator import contextmanager
 
-from IBA.pytorch import IBA, TorchWelfordEstimator, _InterruptExecution
+from IBA.pytorch import IBA, TorchWelfordEstimator
 
 
 class IBAReadout(IBA):
@@ -24,7 +24,8 @@ class IBAReadout(IBA):
         self.layers = readout_layers
         self.model = model  # used for the nested pass
         self._readout_estimators = [TorchWelfordEstimator() for _ in readout_layers]
-        self._readout_values = [None for _ in readout_layers]  # The recorded intermediate activations
+        # The recorded intermediate activations
+        self._readout_values = [None for _ in readout_layers]
         self._readout_hooks = [None for _ in readout_layers]  # Registered hooks
         self._input_hook = None  # To record the input
         self._last_input = None  # Used as input for the nested forward pass
@@ -42,7 +43,8 @@ class IBAReadout(IBA):
         # Define readout network layers
         self.relu = nn.ReLU(inplace=False)
         self.conv1 = nn.Conv2d(in_channels=features_in, out_channels=features_in//2, kernel_size=1)
-        self.conv2 = nn.Conv2d(in_channels=features_in//2, out_channels=features_out*2, kernel_size=1)
+        self.conv2 = nn.Conv2d(in_channels=features_in//2, out_channels=features_out*2,
+                               kernel_size=1)
         self.conv3 = nn.Conv2d(in_channels=features_out*2, out_channels=features_out, kernel_size=1)
         # Initialize with identity mapping
         with torch.no_grad():
@@ -63,7 +65,8 @@ class IBAReadout(IBA):
 
     def heatmap(self, input_t, model, **kwargs):
         if len(kwargs) > 0:
-            warnings.warn(f"Additional arguments ({list(kwargs.keys())}) are ignored in the Readout IBA.")
+            warnings.warn(f"Additional arguments ({list(kwargs.keys())}) "
+                          " are ignored in the Readout IBA.")
         # Pass the input through the model
         with self.supress_information(), torch.no_grad():
             model(input_t)
@@ -133,14 +136,17 @@ class IBAReadout(IBA):
             self.model(self._last_input)
 
         # Normalize using the estimators
-        readouts = [(r - e.mean()) / e.std() for r, e in zip(self._readout_values, self._readout_estimators)]
+        readouts = [(r - e.mean()) / e.std()
+                    for r, e in zip(self._readout_values, self._readout_estimators)]
 
         # Resize to fit shape of bottleneck layer
         spatial_shape = self.estimator.shape[-2:]
         # Expand readouts of fully connected layers to feature maps
-        readouts = [r[..., None, None].expand(*r.shape, *spatial_shape) if len(r.shape) == 2 else r for r in readouts]
+        readouts = [r[..., None, None].expand(*r.shape, *spatial_shape)
+                    if len(r.shape) == 2 else r for r in readouts]
         # Interpolate to get identical spatial shape as x
-        readouts = [F.interpolate(input=r, size=spatial_shape, mode="bilinear", align_corners=True) for r in readouts]
+        readouts = [F.interpolate(input=r, size=spatial_shape, mode="bilinear", align_corners=True)
+                    for r in readouts]
 
         # Stack normalized readout values
         readout = torch.cat(readouts, dim=1)

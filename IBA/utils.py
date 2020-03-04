@@ -1,11 +1,11 @@
 import numpy as np
 
-from collections import OrderedDict
 
 # this module should be independent of torch and tensorflow
 assert 'torch' not in globals()
 assert 'tf' not in globals()
 assert 'tensorflow' not in globals()
+
 
 class WelfordEstimator:
     """
@@ -90,7 +90,6 @@ class WelfordEstimator:
 def plot_heatmap(heatmap, img=None, ax=None, label='Bits / Pixel',
                  min_alpha=0.2, max_alpha=0.7, vmax=None,
                  colorbar_size=0.3, colorbar_pad=0.08):
-
     """
     Plots the heatmap with an bits/pixel colorbar and optionally overlays the image.
 

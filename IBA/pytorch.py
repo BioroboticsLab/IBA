@@ -18,6 +18,7 @@ def insert_into_sequential(sequential, layer, idx):
     children.insert(idx, layer)
     return nn.Sequential(*children)
 
+
 def tensor_to_np_img(img_t):
     """
     Convert a torch tensor of shape ``(c, h, w)`` to a numpy array of shape ``(h, w, c)``
@@ -27,6 +28,7 @@ def tensor_to_np_img(img_t):
         Normalize(mean=[0, 0, 0], std=[1 / 0.229, 1 / 0.224, 1 / 0.225]),
         Normalize(std=[1, 1, 1], mean=[-0.485, -0.456, -0.406]),
     ])(img_t).detach().cpu().numpy().transpose(1, 2, 0)
+
 
 class SpatialGaussianKernel(nn.Module):
     """ A simple convolutional layer with fixed gaussian kernels, used to smoothen the input """
@@ -211,11 +213,12 @@ class IBA(nn.Module):
             try:
                 from packaging import version
                 if version.parse(torch.__version__) < version.parse("1.2"):
-                    raise RuntimeWarning("IBA has to be manually injected into the model with your "
-                                         "version of torch: Forward hooks are only allowed to modify "
-                                         "the output in torch >= 1.2. Please upgrade torch or resort to "
-                                         "adding the IBA layer into the model directly as: model.any_layer = "
-                                         "nn.Sequential(model.any_layer, iba)")
+                    raise RuntimeWarning(
+                        "IBA has to be manually injected into the model with your "
+                        "version of torch: Forward hooks are only allowed to modify "
+                        "the output in torch >= 1.2. Please upgrade torch or resort to "
+                        "adding the IBA layer into the model directly as: model.any_layer = "
+                        "nn.Sequential(model.any_layer, iba)")
             finally:
                 pass  # Do not complain if packaging is not installed
 
@@ -236,10 +239,12 @@ class IBA(nn.Module):
         We use the estimator to obtain shape and device.
         """
         if self.estimator.n_samples() <= 0:
-            raise RuntimeWarning("You need to estimate the feature distribution before using the bottleneck.")
+            raise RuntimeWarning("You need to estimate the feature distribution"
+                                 " before using the bottleneck.")
         shape = self.estimator.shape
         device = self.estimator.device
-        self.alpha = nn.Parameter(torch.full(shape, self.initial_alpha, device=device), requires_grad=True)
+        self.alpha = nn.Parameter(torch.full(shape, self.initial_alpha, device=device),
+                                  requires_grad=True)
         if self.sigma is not None and self.sigma > 0:
             # Construct static conv layer with gaussian kernel
             kernel_size = int(round(2 * self.sigma)) * 2 + 1  # Cover 2.5 stds in both directions
@@ -477,7 +482,8 @@ class IBA(nn.Module):
         return self.buffer_capacity.mean(dim=0)
 
     def _current_heatmap(self, shape=None):
-        """ Return a 2D-heatmap of flowing information. Optionally resize the map to match a certain shape. """
+        """ Return a 2D-heatmap of flowing information.
+        Optionally resize the map to match a certain shape. """
         heatmap = self.capacity().detach().cpu().numpy()
         heatmap = np.nansum(heatmap, 0) / float(np.log(2))
         if shape is not None:
