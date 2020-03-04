@@ -13,10 +13,14 @@ setuptools.setup(
         'dev': [
             'pytest',
             'pytest-pep8',
-            'pytest-cov'
+            'pytest-cov',
+            'sphinx',
+            'sphinx_rtd_theme',
+            'sphinx-autobuild',
         ],
         'torch': [
-            'torch'
+            'torch',
+            'torchvision',
         ],
         'tensorflow': [
             'tensorflow>=1.12.0'

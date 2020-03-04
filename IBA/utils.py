@@ -1,4 +1,5 @@
 import numpy as np
+from skimage.transform import resize
 
 
 # this module should be independent of torch and tensorflow
@@ -87,15 +88,37 @@ class WelfordEstimator:
         self._neuron_nonzero = state['neuron_nonzero']
 
 
-def plot_heatmap(heatmap, img=None, ax=None, label='Bits / Pixel',
-                 min_alpha=0.2, max_alpha=0.7, vmax=None,
-                 colorbar_size=0.3, colorbar_pad=0.08):
+def to_saliency_map(capacity, shape=None, data_format='NCHW'):
+    """
+    Converts the layer capacity (in nats) to a saliency map (in bits) of the given shape .
+    """
+    if data_format == 'NCHW':
+        saliency_map = np.nansum(capacity, 0)
+    if data_format == 'NHWC':
+        saliency_map = np.nansum(capacity, -1)
+
+    # to bits
+    saliency_map /= float(np.log(2))
+
+    if shape is not None:
+        ho, wo = saliency_map.shape
+        h, w = shape
+        # Scale bits to the pixels
+        saliency_map *= (ho*wo) / (h*w)
+        return resize(saliency_map, shape, order=1, preserve_range=True)
+    else:
+        return saliency_map
+
+
+def plot_saliency_map(saliency_map, img=None, ax=None, label='Bits / Pixel',
+                      min_alpha=0.2, max_alpha=0.7, vmax=None,
+                      colorbar_size=0.3, colorbar_pad=0.08):
     """
     Plots the heatmap with an bits/pixel colorbar and optionally overlays the image.
 
     Args:
-        heatmap: np.ndarray the heatmap
-        img: np.ndarray show this image under the heatmap
+        saliency_map: np.ndarray the saliency_map
+        img: np.ndarray show this image under the saliency_map
         ax: matplotlib axis. If ``None``, a new plot is created
         label: label for the colorbar
         min_alpha: minimum alpha value for the overlay. only used if ``img`` is given
@@ -126,15 +149,15 @@ def plot_heatmap(heatmap, img=None, ax=None, label='Bits / Pixel',
         colorbar_pad = Fixed(colorbar_pad)
     cax1 = ax1_divider.append_axes("right", size=colorbar_size, pad=colorbar_pad)
     if vmax is None:
-        vmax = heatmap.max()
+        vmax = saliency_map.max()
     norm = mpl.colors.Normalize(vmin=0, vmax=vmax)
     n = 256
     half_jet_rgba = plt.cm.seismic(np.linspace(0.5, 1, n))
     half_jet_rgba[:, -1] = np.linspace(0.2, 1, n)
     cmap = mpl.colors.ListedColormap(half_jet_rgba)
-    hmap_jet = cmap(norm(heatmap))
+    hmap_jet = cmap(norm(saliency_map))
     if img is not None:
-        hmap_jet[:, :, -1] = (max_alpha - min_alpha)*norm(heatmap) + min_alpha
+        hmap_jet[:, :, -1] = (max_alpha - min_alpha)*norm(saliency_map) + min_alpha
     ax.imshow(hmap_jet, alpha=1.)
     cbar = mpl.colorbar.ColorbarBase(cax1, cmap=cmap, norm=norm)
     cbar.set_label(label, fontsize=16)

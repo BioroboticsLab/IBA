@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import itertools
 from contextlib import contextmanager
 
 try:
@@ -10,14 +11,14 @@ import tensorflow_probability as tfp
 
 import numpy as np
 import keras
-from IBA.utils import WelfordEstimator
+from IBA.utils import WelfordEstimator, to_saliency_map
 import keras.backend as K
 from tqdm import trange
 from tqdm.auto import tqdm
-from IBA._keras_graph import _BatchSequence, contains_activation
+from IBA._keras_graph import contains_activation
 
 # expose for importing
-from IBA._keras_graph import model_wo_softmax   # noqa
+from IBA._keras_graph import pre_softmax_tensors   # noqa
 
 
 class TFWelfordEstimator(WelfordEstimator):
@@ -45,7 +46,7 @@ class TFWelfordEstimator(WelfordEstimator):
         self._feature_mean = state['feature_mean']
 
 
-def kl_div(r, lambda_, mean_r, std_r):
+def _kl_div(r, lambda_, mean_r, std_r):
     r_norm = (r - mean_r) / std_r
     var_z = (1 - lambda_) ** 2
 
@@ -57,7 +58,7 @@ def kl_div(r, lambda_, mean_r, std_r):
     return capacity
 
 
-def gaussian_kernel(size, std):
+def _gaussian_kernel(size, std):
     """Makes 2D gaussian Kernel for convolution."""
     d = tfp.distributions.Normal(0., std)
     vals = d.prob(tf.cast(tf.range(start=-size, limit=size + 1), tf.float32))
@@ -65,11 +66,12 @@ def gaussian_kernel(size, std):
     return gauss_kernel / tf.reduce_sum(gauss_kernel)
 
 
-def gaussian_blur(x, std=1.):
+def _gaussian_blur(x, std=1.):
+
     # Cover 2.5 stds in both directions
     kernel_size = tf.cast((tf.round(2 * std)) * 2 + 1, tf.int32)
 
-    kernel = gaussian_kernel(kernel_size // 2, std)
+    kernel = _gaussian_kernel(kernel_size // 2, std)
     kernel = kernel[:, :, None, None]
     kernel = tf.tile(kernel, (1, 1, x.shape[-1], 1))
 
@@ -88,7 +90,6 @@ def gaussian_blur(x, std=1.):
         x = tf.pad(x, [[0, 0], [kh, kh], [0, 0]], "REFLECT")
         kernel = kernel[:, kh+1:kh+2]
         x_extra_dim = x[:, :, None]
-        print('x_extra_dim', x_extra_dim.shape, kernel.shape)
         x_blur = tf.nn.depthwise_conv2d(
             x_extra_dim,
             kernel,
@@ -100,6 +101,15 @@ def gaussian_blur(x, std=1.):
     else:
         raise ValueError("shape not supported! got: {}".format(x.shape))
     return tf.cond(tf.math.equal(std, 0.), lambda: x, lambda: x_blur)
+
+
+def model_wo_softmax(model):
+    """Creates a new model w/o the final softmax activation.
+       ``model`` must be a keras model.
+    """
+    return keras.models.Model(inputs=model.inputs,
+                              outputs=pre_softmax_tensors(model.outputs),
+                              name=model.name)
 
 
 class IBALayer(keras.layers.Layer):
@@ -167,9 +177,7 @@ class IBALayer(keras.layers.Layer):
 
     # Build of layer
     def build(self, input_shape):
-        self._featuremap_shape = [1, ] + [int(d) for d in input_shape[1:]]
-        shape = self._featuremap_shape
-        print('build shape', shape)
+        shape = self._feature_shape = [1, ] + [int(d) for d in input_shape[1:]]
 
         k = np.prod([int(s) for s in shape]).astype(np.float32)
         # optimization placeholders
@@ -184,7 +192,7 @@ class IBALayer(keras.layers.Layer):
         self._alpha = tf.get_variable(name='alpha', initializer=alpha_init*tf.ones(shape))
 
         # feature map
-        self._featuremap = tf.get_variable('featuremap', shape, trainable=False)
+        self._feature = tf.get_variable('feature', shape, trainable=False)
 
         # std normal noise
         self._std_normal = tf.random.normal([self._batch_size, ] + shape[1:])
@@ -223,12 +231,10 @@ class IBALayer(keras.layers.Layer):
         # shape = [1,] + inputs.shape[1:].as_list()
         # self.active_neurons = tf.get_variable('active_neurons', shape, trainable=False)
 
-        featuremap = tf.cond(self._use_layer_input,
-                             lambda: inputs,
-                             lambda: self._featuremap)
+        feature = tf.cond(self._use_layer_input, lambda: inputs, lambda: self._feature)
 
-        tile_shape = [self._batch_size, ] + [1] * (len(self._featuremap_shape) - 1)
-        R = tf.tile(featuremap, tile_shape)
+        tile_shape = [self._batch_size, ] + [1] * (len(self._feature_shape) - 1)
+        R = tf.tile(feature, tile_shape)
         pass_mask = tf.tile(self._pass_mask, tile_shape)
         restrict_mask = 1 - pass_mask
 
@@ -239,7 +245,7 @@ class IBALayer(keras.layers.Layer):
         # std_large_enough = tf.cast(self.std_x >= self.min_std_r, tf.float32)
 
         lambda_pre_blur = tf.sigmoid(self._alpha)
-        λ = gaussian_blur(lambda_pre_blur, std=self._smooth_std)
+        λ = _gaussian_blur(lambda_pre_blur, std=self._smooth_std)
 
         # ε ~ N(μ_r, σ_r)
         ε = std_r_min * self._std_normal + self._mean_r
@@ -251,8 +257,7 @@ class IBALayer(keras.layers.Layer):
 
         output = tf.cond(self._restrict_flow, lambda: Z_with_passing, lambda: inputs)
         # save capacityies
-        self._capacity = kl_div(R, λ, self._mean_r, std_r_min) * restrict_mask
-        self._capacity_in_bits = self._capacity / np.log(2)
+        self._capacity = _kl_div(R, λ, self._mean_r, std_r_min) * restrict_mask
         self._capacity_mean = tf.reduce_sum(self._capacity) / tf.reduce_sum(restrict_mask)
 
         # save tensors for report
@@ -261,23 +266,20 @@ class IBALayer(keras.layers.Layer):
         self._report('eps', ε)
         self._report('alpha', self._alpha)
         self._report('capacity', self._capacity)
-        self._report('capacity_in_bits', self._capacity_in_bits)
         self._report('capacity_mean', self._capacity_mean)
 
-        self._report('perturbed_featuremap', Z)
-        self._report('perturbed_featuremap_with_passing', Z_with_passing)
-        self._report_first('featuremap', featuremap)
+        self._report('perturbed_feature', Z)
+        self._report('perturbed_feature_passing', Z_with_passing)
+
+        self._report_first('feature', self._feature)
+        self._report_first('feature_mean', self._mean_r)
+        self._report_first('feature_std', self._std_r)
         self._report_first('pass_mask', pass_mask)
 
-        self._report_first('featuremap_mean', self._mean_r)
-        self._report_first('featuremap_std', self._std_r)
-
-        # restrict_flow = tf.cast(self._restrict_flow, tf.float32)
-        # return restrict_flow * Z_with_passing + (1 - restrict_flow) * inputs
         return output
 
     def _get_session(self, session=None):
-        return session or keras.backend.get_session()
+        return session or keras.backend.get_session() or tf.get_default_session()
 
     # Set model loss
 
@@ -313,20 +315,37 @@ class IBALayer(keras.layers.Layer):
 
     # Fit std and mean estimator
     def fit(self, feed_dict, session=None, run_kwargs={}):
+        """
+        Estimate the feature mean and std from the given feed_dict.
+
+        Args:
+            generator: Yields feed_dict with all inputs
+            n_samples: Stop after ``n_samples``
+            session: use this session. If ``None`` use default session.
+            run_kwargs: additional kwargs to ``session.run``.
+
+        Example:
+
+            TODO
+        """
         self._estimator.fit(feed_dict, session, run_kwargs)
 
-    def fit_generator(self, generator, steps_per_epoch=None, epochs=1, verbose=1, session=None):
+    def fit_generator(self, generator, n_samples=5000, progbar=True, session=None, run_kwargs={}):
+        """
+        Estimates the feature mean and std from the generator.
+
+        Args:
+            generator: Yields ``feed_dict``s with all inputs.
+            n_samples: Stop after ``n_samples``.
+            session: use this session. If ``None`` use default session.
+            run_kwargs: additional kwargs to ``session.run``.
         """
 
-        """
-        session = self._get_session(session)
-        for epoch in range(epochs):
-            for step, (imgs, targets) in enumerate(tqdm(
-                    generator, disable=verbose, desc="[Fit Estimator #{}]".format(epoch))):
-                feed_dict = {self._model.input: imgs}
-                self._estimator.fit(feed_dict, session=session)
-                if step + 1 >= steps_per_epoch:
-                    break
+        for step, feed_dict in enumerate(tqdm(
+                generator, disable=progbar, desc="[Fit Estimator]")):
+            self._estimator.fit(feed_dict, session=session, run_kwargs=run_kwargs)
+            if self._estimator.n_samples() >= n_samples:
+                break
 
     def analyze(self, feed_dict,
                 pass_mask=None,
@@ -339,11 +358,14 @@ class IBALayer(keras.layers.Layer):
                 normalize_beta=True,
                 session=None,
                 progbar=False):
+        """
+        Analyzes the
+        """
         session = self._get_session(session)
-        featuremap = session.run(self.input, feed_dict=feed_dict)
+        feature = session.run(self.input, feed_dict=feed_dict)
 
-        return self._analyze_featuremap(
-            featuremap,
+        return self._analyze_feature(
+            feature,
             feed_dict,
             pass_mask=pass_mask,
             batch_size=batch_size,
@@ -356,18 +378,19 @@ class IBALayer(keras.layers.Layer):
             session=session,
             progbar=False)
 
-    def _analyze_featuremap(self, featuremap,
-                            feed_dict,
-                            pass_mask=None,
-                            batch_size=10,
-                            steps=10,
-                            beta=10,
-                            learning_rate=100,
-                            min_std=0.01,
-                            smooth_std=1,
-                            normalize_beta=True,
-                            session=None,
-                            progbar=False):
+    def _analyze_feature(self,
+                         feature,
+                         feed_dict,
+                         pass_mask=None,
+                         batch_size=10,
+                         steps=10,
+                         beta=10,
+                         learning_rate=100,
+                         min_std=0.01,
+                         smooth_std=1,
+                         normalize_beta=True,
+                         session=None,
+                         progbar=False):
         if session is None:
             session = keras.backend.get_session()
 
@@ -379,7 +402,7 @@ class IBALayer(keras.layers.Layer):
         if not normalize_beta:
             # we use the mean of the capacity, which is equivalent to dividing by k=h*w*c.
             # therefore, we have to denormalize beta:
-            beta = beta * np.prod(featuremap.shape)
+            beta = beta * np.prod(feature.shape)
 
         if not self._feature_mean_std_given:
             assert self._estimator.n_samples() > 0
@@ -404,7 +427,7 @@ class IBALayer(keras.layers.Layer):
             tf.variables_initializer(self._optimizer.variables()),
             tf.assign(self._mean_r, self._feature_mean, name='assign_feature_mean'),
             tf.assign(self._std_r, self._feature_std, name='assign_feature_std'),
-            tf.assign(self._featuremap, featuremap, name='assign_feature'),
+            tf.assign(self._feature, feature, name='assign_feature'),
             tf.assign(self._beta, beta, name='assign_beta'),
             tf.assign(self._smooth_std, smooth_std, name='assign_smooth_std'),
             tf.assign(self._min_std_r, min_std, name='assign_min_std'),
@@ -435,6 +458,7 @@ class IBALayer(keras.layers.Layer):
 
         final_report_tensors = list(report_tensors.values())
         final_report_tensor_names = list(report_tensors.keys())
+
         if 'capacity' not in report_tensors:
             final_report_tensors.append(self._capacity)
             final_report_tensor_names.append('capacity')
@@ -442,7 +466,7 @@ class IBALayer(keras.layers.Layer):
         vals = session.run(final_report_tensors, feed_dict=feed_dict)
         self._log['final'] = OrderedDict(zip(final_report_tensor_names, vals))
 
-        return self._log['final']['capacity']
+        return self._log['final']['capacity'][0]
 
     def state_dict(self):
         return {
@@ -512,7 +536,7 @@ class IBACopyGraph(IBALayer):
 
             self._original_vars = self._original_graph.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
 
-            # here the original graph is copied an the featuremap is replaced
+            # here the original graph is copied an the feature is replaced
             imported_vars = tf.import_graph_def(
                 self._original_graph_def,
                 input_map={feature_name: self._Z},
@@ -563,7 +587,7 @@ class IBACopyGraph(IBALayer):
         feature = self.get_feature(feature_feed_dict)
 
         with self.copied_session_and_graph_as_default():
-            return super()._analyze_featuremap(
+            return super()._analyze_feature(
                 feature, copy_feed_dict, batch_size=batch_size, steps=steps,
                 beta=beta, learning_rate=learning_rate, min_std=min_std,
                 smooth_std=smooth_std, normalize_beta=normalize_beta,
@@ -596,15 +620,17 @@ class _InnvestigateAPI:
         self._disable_model_checks = disable_model_checks
         self._model = model
 
-    def fit(self, X=None, batch_size=32, **kwargs):
-        generator = _BatchSequence(X, batch_size)
-        if 'verbose' in kwargs:
-            self._fit_generator(generator, **kwargs)
-        else:
-            self._fit_generator(generator, verbose=0, **kwargs)
+    # def fit(self, X=None, batch_size=32, **kwargs):
 
-    def fit_generator(self, generator, steps_per_epoch=None, epochs=1, verbose=1, shuffle=True):
-        pass
+    # def fit_generator(self,
+    #                    generator,
+    #                    steps_per_epoch=None,
+    #                    epochs=1,
+    #                    max_queue_size=10,
+    #                    workers=1,
+    #                    use_multiprocessing=False,
+    #                    verbose=0,
+    #                    disable_no_training_warning=None):
 
     def analyze(self, X):
         raise NotImplementedError()
@@ -693,12 +719,41 @@ class IBACopyGraphInnvestigate(IBACopyGraph, _InnvestigateAPI):
         IBACopyGraph.__init__(self, feature_name, output_names, estimator, feature_mean_std,
                               graph, session, copy_session_config)
         _InnvestigateAPI.__init__(self, model, neuron_selection_mode)
+        with self.copied_session_and_graph_as_default():
+            IBALayer.set_classification_loss(self, self._outputs[0])
+
+    def fit(self, X, session=None, run_kwargs={}):
+        session = session or self._original_session
+        super().fit({self._model.input: X}, session, run_kwargs)
+
+    def fit_generator(self, generator, steps_per_epoch=None, epochs=1, verbose=1, session=None):
+        session = self._get_session(session)
+        for epoch in range(epochs):
+            if steps_per_epoch is not None:
+                total = steps_per_epoch
+                maybe_sliced_gen = itertools.islice(generator, steps_per_epoch)
+            else:
+                maybe_sliced_gen = generator
+                try:
+                    total = len(generator)
+                except TypeError:
+                    total = None
+
+            for step, (imgs, targets) in enumerate(tqdm(
+                    maybe_sliced_gen, total=total, disable=verbose == 0,
+                    desc="[Fit Estimator, epoch {}]".format(epoch))):
+
+                feed_dict = {self._model.input: imgs}
+                self._estimator.fit(feed_dict, session=session)
 
     def analyze(self, X, neuron_selection=None):
-        if not hasattr(self, '_optimizer'):
-            with self.copied_session_and_graph_as_default():
-                IBALayer.set_classification_loss(self, self._outputs[0])
+        """
+        Returns the saliency maps for a batch of samples ``X``.
 
+        Args:
+            X: batch of samples
+            neuron_selection: which neuron to explain. Requires neuron_selection_mode == index
+        """
         if(neuron_selection is not None and
            self._neuron_selection_mode != "index"):
             raise ValueError("Only neuron_selection_mode 'index' expects "
@@ -716,13 +771,17 @@ class IBACopyGraphInnvestigate(IBACopyGraph, _InnvestigateAPI):
             logits = self.predict({self._model.input: X})
             neuron_selection = np.argmax(logits, axis=1)
 
-        capacity = []
+        outputs = []
         for x, target in zip(X, neuron_selection):
-            capacity.append(super().analyze(
+            capacity = super().analyze(
                 feature_feed_dict={self._model.input: X},
                 copy_feed_dict={self.target: np.array([target])},
-            ))
-        return np.concatenate(capacity)
+            )
+            b, h, w, c = X.shape
+            saliency_map = to_saliency_map(capacity, shape=(h, w), data_format='NHWC')
+            outputs.append(saliency_map)
+
+        return np.concatenate(outputs)
 
     def predict(self, feature_feed_dict):
         return super().predict(feature_feed_dict)[0]
