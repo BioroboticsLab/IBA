@@ -7,7 +7,8 @@ from decorator import contextmanager
 
 from IBA.pytorch import IBA, TorchWelfordEstimator, _InterruptExecution
 
-class IBA_Readout(IBA):
+
+class IBAReadout(IBA):
     """
     The Readout Bottleneck is an extension to yield the alphas for the IBA bottleneck
     from a readout network. The readout network is trained on intermediate feature maps
@@ -18,8 +19,8 @@ class IBA_Readout(IBA):
     - additional hooks to collect the input and the feature maps in the nested pass
     - a readout network of three 1x1 conv. layers to yield alpha
     """
-    def __init__(self, readout_layers, model, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, attach_layer, readout_layers, model, **kwargs):
+        super().__init__(attach_layer, **kwargs)
         self.layers = readout_layers
         self.model = model  # used for the nested pass
         self._readout_estimators = [TorchWelfordEstimator() for _ in readout_layers]
