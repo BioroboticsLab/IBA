@@ -1,7 +1,7 @@
 
-IBA.pytorch
+IBA.tensorflow_v1
 ===========================================
 
-.. automodule:: IBA.pytorch
+.. automodule:: IBA.tensorflow_v1
     :members:
     :show-inheritance:

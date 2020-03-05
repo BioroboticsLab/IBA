@@ -1,7 +1,7 @@
 
-iba.utils
+IBA.utils
 ===========================
 
-.. automodule:: iba.utils
+.. automodule:: IBA.utils
     :members:
     :show-inheritance:

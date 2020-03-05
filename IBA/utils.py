@@ -11,23 +11,26 @@ assert 'tensorflow' not in globals()
 class WelfordEstimator:
     """
     Estimates the mean and standard derivation.
-    For the algorithm see ``https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance``.
-    Args:
-        channels: The number of channels of the feature map
-        height: The heigth of the feature map
-        width: The width of the feature map
+    For the algorithm see `wikipedia <https://en.wikipedia.org/wiki/
+    Algorithms_for_calculating_variance#/Welford's_online_algorithm>`_.
+
     Example:
         Given a batch of images ``imgs`` with shape ``(10, 3, 64, 64)``, the mean and std could
         be estimated as follows::
+
             imgs = torch.randn(10, 3, 64, 64)
-            estim = WelfordEstimator(3, 64, 64)
+            estim = WelfordEstimator()
             estim(imgs)
+
             # returns the estimated mean
             estim.mean()
+
             # returns the estimated std
             estim.std()
-            # returns the number of samples, here 10
+
+            # returns the number of seen samples, here 10
             estim.n_samples()
+
             # returns a mask with active neurons
             estim.active_neurons()
     """
@@ -74,6 +77,7 @@ class WelfordEstimator:
         return (self._neuron_nonzero.astype(np.float32) / self._n_samples) > threshold
 
     def state_dict(self):
+        """ Returns internal state. Useful for saving to disk."""
         return {
             'm': self.m,
             's': self.s,
@@ -82,6 +86,7 @@ class WelfordEstimator:
         }
 
     def load_state_dict(self, state):
+        """ Loads the internal state of the estimator. """
         self.m = state['m']
         self.s = state['s']
         self._n_samples = state['n_samples']

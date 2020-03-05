@@ -6,6 +6,7 @@ Welcome to per-sample-bottleneck's documentation!
    :maxdepth: 2
 
    api/iba_pytorch
+   api/iba_tensorflow_v1
    api/utils
 
 

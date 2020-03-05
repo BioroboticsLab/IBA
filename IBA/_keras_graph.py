@@ -74,7 +74,6 @@ __all__ = [
     "copy_layer_wo_activation",
     "copy_layer",
     "pre_softmax_tensors",
-    "model_wo_softmax",
 
     "get_model_layers",
     "model_contains",
@@ -387,13 +386,6 @@ def pre_softmax_tensors(Xs, should_find_softmax=True):
         raise Exception("No softmax found.")
 
     return ret
-
-
-def model_wo_softmax(model):
-    """Creates a new model w/o the final softmax activation."""
-    return keras.models.Model(inputs=model.inputs,
-                              outputs=pre_softmax_tensors(model.outputs),
-                              name=model.name)
 
 
 ###############################################################################

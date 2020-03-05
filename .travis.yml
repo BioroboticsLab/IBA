@@ -34,4 +34,4 @@ install:
   - pip install keras==$KERAS_VERSION
   - pip install ".[dev, torch, tensorflow]"
 script:
-  - py.test test
+  - ./run_tests.sh

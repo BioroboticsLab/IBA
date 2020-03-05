@@ -1,4 +1,55 @@
+# Copyright (c) Leon Sixt
+#
+# All rights reserved.
+#
+# This code is licensed under the MIT License.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files(the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions :
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+
+"""
+As IBA adds noise to an intermediate layer's output, the
+existing model has to be modified. Either you can add the :class:`.IBALayer` as a layer
+directly in your model or we partially copy your model (using
+``tf.import_graph_def``) with :class:`.IBACopyGraph`. We also provide a wrapper
+of the `innvestigate <https://github.com/albermax/innvestigate>`_ API:
+:class:`.IBACopyGraph`.
+For examples, see also the `notebook directory
+<https://github.com/BioroboticsLab/IBA/tree/master/notebooks>`_.
+
+
++-----------------------------------+--------------+-----------------+------------+
+| Class                             | Label Type   | Requires to add | Copies     |
+|                                   |              | a layer?        | tf graph?  |
++===================================+==============+=================+============+
+| :class:`.IBALayer`                |   Any        |     ✅          |      ❌    |
++-----------------------------------+--------------+-----------------+------------+
+| :class:`.IBACopyGraph`            |   Any        |     ❌          |      ✅    |
++-----------------------------------+--------------+-----------------+------------+
+| :class:`.IBACopyGraphInnvestigate`|Classification|     ❌          |      ✅    |
++-----------------------------------+--------------+-----------------+------------+
+
+
+"""
+
 from collections import OrderedDict
+import warnings
 import itertools
 from contextlib import contextmanager
 
@@ -22,26 +73,72 @@ from IBA._keras_graph import pre_softmax_tensors   # noqa
 
 
 class TFWelfordEstimator(WelfordEstimator):
+    """
+    Estimates the mean and standard derivation.
+    For the algorithm see `wikipedia <https://en.wikipedia.org/wiki/
+    Algorithms_for_calculating_variance#/Welford's_online_algorithm>`_.
+
+    Args:
+        feature_name (str): name of the feature tensor
+        graph (tf.Graph): graph which holds the feature tensor. If ``None``,
+            uses the default graph.
+    """
     def __init__(self, feature_name, graph=None):
         self._feature_name = feature_name
         self._graph = graph or tf.get_default_graph()
         super().__init__()
 
     def fit(self, feed_dict, session=None, run_kwargs={}):
+        """
+        Estimates the mean and std given the inputs in ``feed_dict``.
+
+        Args:
+            feed_dict (dict): tensorflow feed dict with model inputs.
+            session (tf.Session): session to execute the model. If ``None``,
+                uses the default session.
+            run_kwargs (dict): additional kwargs to ``session.run``.
+        """
         session = session or tf.get_default_session() or K.get_session()
         feature = self._graph.get_tensor_by_name(self._feature_name)
         feat_values = session.run(feature, feed_dict=feed_dict, **run_kwargs)
         super().fit(feat_values)
 
     def fit_generator(self, generator, session=None, progbar=True, run_kwargs={}):
+        """
+        Estimates the mean and std from the ``feed_dict`` generator.
+
+        Args:
+            generator: yield tensorflow ``feed_dict``s.
+            session (tf.Session): session to execute the model. If ``None``,
+                uses the default session.
+            run_kwargs (dict): additional kwargs to ``session.run``.
+            progbar (bool): flag to show progress bar.
+        """
         for feed_dict in tqdm(generator, progbar=progbar):
             self.fit(feed_dict, session, run_kwargs)
 
-    def state_dict(self):
+    def state_dict(self) -> dict:
+        """Returns the estimator internal state. Can be loaded with :meth:`load_state_dict`.
+
+        Example: ::
+
+            state = estimator.state_dict()
+            with open('estimator_state.pickle', 'wb') as f:
+                pickle.dump(state, f)
+
+            # load it
+
+            estimator = TFWelfordEstimator(feature_name=None)
+            with open('estimator_state.pickle', 'rb') as f:
+                state = pickle.load(f)
+                estimator.load_state_dict(state)
+
+        """
         state = super().state_dict()
         state['feature_name'] = self._feature_name
 
-    def load_state_dict(self, state):
+    def load_state_dict(self, state: dict):
+        """Loads estimator internal state."""
         super().load_state_dict(state)
         self._feature_mean = state['feature_mean']
 
@@ -103,7 +200,7 @@ def _gaussian_blur(x, std=1.):
     return tf.cond(tf.math.equal(std, 0.), lambda: x, lambda: x_blur)
 
 
-def model_wo_softmax(model):
+def model_wo_softmax(model: keras.Model):
     """Creates a new model w/o the final softmax activation.
        ``model`` must be a keras model.
     """
@@ -113,9 +210,43 @@ def model_wo_softmax(model):
 
 
 class IBALayer(keras.layers.Layer):
-    def __init__(self, estimator=None, batch_size=10,
-                 feature_mean_std=None,
-                 **kwargs):
+    """
+    A keras layer that can be included in your model.
+    This class should work with any model and does not copy the tensorflow graph.
+    If you cannot alter you model definition, you have to copy the graph (use
+    :class:`.IBACopyGraph`, the :class:`.IBACopyGraphInnvestigate`).
+
+    Example:  ::
+
+        model = keras.Sequential()
+
+        # add some layer
+        model.add(Conv2D())
+
+        # add iba in between
+        iba = IBALayer()
+        model.add(iba)
+
+        # add some more layers
+        model.add(Dense(10))
+
+        # set classification cross-entropy loss
+        iba.set_classification_loss(model.output)
+
+        # estimate the feature mean and std.
+        for imgs, _ in data_generator():
+            iba.fit({model.input: imgs})
+
+        # explain target for image
+        saliency_map = iba.analyze({model.input: image, iba.target: target})
+
+
+    Args:
+        estimator (TFWelfordEstimator): already fitted estimator.
+        feature_mean_std (tuple): tuple of estimated feature ``(mean, std)``.
+        **kwargs: keras layer kwargs, see ``keras.layers.Layer``
+    """
+    def __init__(self, estimator=None, feature_mean_std=None, **kwargs):
         self._estimator = estimator
         self._model_loss_set = False
 
@@ -159,23 +290,32 @@ class IBALayer(keras.layers.Layer):
                 ret[name] = self._report_tensors_first[name]
         return ret
 
-    def collect(self, *names):
-        for name in names:
+    def collect(self, *var_names):
+        """
+        Mark ``*var_names`` to be collected for the report.
+        See :meth:`available_report_variables` for all variable names.
+        """
+        for name in var_names:
             assert name in self._report_tensors or name in self._report_tensors_first, \
                 "not tensor found with name {}! Try one of these: {}".format(
                     name, self.available_report_variables())
-        self._collect_names = names
+        self._collect_names = var_names
 
     def collect_all(self):
+        """
+        Mark all variables to be collected for the report. If all variables are collected,
+        the optimization can slow down.
+        """
         self.collect(*self.available_report_variables())
 
     def available_report_variables(self):
+        """Returns all variables that can be collected for :meth:`get_report`."""
         return sorted(list(self._report_tensors.keys()) + list(self._report_tensors_first.keys()))
 
     def get_report(self):
+        """Returns the report for the last run."""
         return self._log
 
-    # Build of layer
     def build(self, input_shape):
         shape = self._feature_shape = [1, ] + [int(d) for d in input_shape[1:]]
 
@@ -279,13 +419,26 @@ class IBALayer(keras.layers.Layer):
         return output
 
     def _get_session(self, session=None):
+        """ Returns session if not None or the keras or tensoflow default session.  """
         return session or keras.backend.get_session() or tf.get_default_session()
 
     # Set model loss
 
+    def get_copied_outputs(self):
+        """Returns the copied model outputs provided in the
+        :class:`the constructor <.IBACopyGraph>`."""
+        return self._outputs
+
     def set_classification_loss(self, logits, optimizer_cls=tf.train.AdamOptimizer):
         """
-        Creates a cross-entropy loss from logits.
+        Creates a cross-entropy loss from the logit tensors.
+
+        Example: ::
+
+            iba.set_classification_loss(model.output)
+
+        You have to ensure that the final layer of ``model`` does not applies a softmax.
+        For keras models, you can remove a softmax activation using :func:`model_wo_softmax`.
         """
         self.target = tf.get_variable('iba_target', dtype=tf.int32, initializer=[1])
 
@@ -302,6 +455,16 @@ class IBALayer(keras.layers.Layer):
         return self.target
 
     def set_model_loss(self, model_loss, optimizer_cls=tf.train.AdamOptimizer):
+        """
+        Sets the model loss for the final objective ``model_loss + beta * capacity_mean``.
+        When build the ``model_loss``, ensure you are using the copied graph.
+
+        Example: ::
+
+            with iba.copied_session_and_graph_as_default():
+                iba.get_copied_outputs()
+
+        """
         self._optimizer = optimizer_cls(learning_rate=self._learning_rate)
         information_loss = self._beta * self._capacity_mean
         loss = model_loss + information_loss
@@ -324,10 +487,17 @@ class IBALayer(keras.layers.Layer):
             session: use this session. If ``None`` use default session.
             run_kwargs: additional kwargs to ``session.run``.
 
-        Example:
+        Example: ::
 
-            TODO
+            # input is a tensorflow placeholder  of your model
+            input = tf.placeholder(tf.float32, name='input')
+
+            X, y = load_data_batch()
+            iba.fit({input: X})
+
+        Where ``input`` is a tensorflow placeholder and ``X`` an input numpy array.
         """
+
         self._estimator.fit(feed_dict, session, run_kwargs)
 
     def fit_generator(self, generator, n_samples=5000, progbar=True, session=None, run_kwargs={}):
@@ -335,7 +505,7 @@ class IBALayer(keras.layers.Layer):
         Estimates the feature mean and std from the generator.
 
         Args:
-            generator: Yields ``feed_dict``s with all inputs.
+            generator: Yields ``feed_dict``s with inputs to all placeholders.
             n_samples: Stop after ``n_samples``.
             session: use this session. If ``None`` use default session.
             run_kwargs: additional kwargs to ``session.run``.
@@ -348,18 +518,37 @@ class IBALayer(keras.layers.Layer):
                 break
 
     def analyze(self, feed_dict,
-                pass_mask=None,
                 batch_size=10,
                 steps=10,
-                beta=10,
-                learning_rate=100,
+                beta=10.,
+                learning_rate=1.,
                 min_std=0.01,
-                smooth_std=1,
+                smooth_std=1.,
                 normalize_beta=True,
                 session=None,
+                pass_mask=None,
                 progbar=False):
         """
-        Analyzes the
+        Returns the saliency map. This method executes an optimization to remove
+        information while retaining a low model loss.
+
+        Args:
+            feed_dict (dict): TensorFlow feed_dict providing your model inputs.
+            batch_size (int): number of samples to average the gradient.
+            steps (int): number of iterations to optimize.
+            beta (int): trade-off parameter between model loss and information loss.
+            learning_rate (float): Learning rate of the Adam optimizer.
+            min_std (float): Minimum feature standard derivation.
+            smooth_std (float): Smoothing of the lambda
+            normalize_beta (bool): Devide beta by the nubmer of neurons
+            session (tf.Session): TensorFlow session to  run the optimization
+            pass_mask (np.array): same shape as the feature map.
+                ``pass_mask`` masks neurons which are always passed to the next layer.
+                No noise is added if ``pass_mask == 0``.  For example, it might
+                be usefull if a variable lenght sequence is zero-padded.
+
+            progbar (bool): Flag to display progressbar.
+
         """
         session = self._get_session(session)
         feature = session.run(self.input, feed_dict=feed_dict)
@@ -381,7 +570,6 @@ class IBALayer(keras.layers.Layer):
     def _analyze_feature(self,
                          feature,
                          feed_dict,
-                         pass_mask=None,
                          batch_size=10,
                          steps=10,
                          beta=10,
@@ -389,6 +577,7 @@ class IBALayer(keras.layers.Layer):
                          min_std=0.01,
                          smooth_std=1,
                          normalize_beta=True,
+                         pass_mask=None,
                          session=None,
                          progbar=False):
         if session is None:
@@ -469,6 +658,9 @@ class IBALayer(keras.layers.Layer):
         return self._log['final']['capacity'][0]
 
     def state_dict(self):
+        """
+        Returns the current layer state.
+        """
         return {
             'estimator': self._estimator.state_dict(),
             'feature_mean': self._feature_mean,
@@ -476,6 +668,9 @@ class IBALayer(keras.layers.Layer):
         }
 
     def load_state_dict(self, state):
+        """
+        Load the given ``state``.
+        """
         self._estimator.load_state_dict(state['estimator'])
         self._feature_mean = state['feature_mean']
         self._feature_std = state['feature_std']
@@ -483,14 +678,36 @@ class IBALayer(keras.layers.Layer):
 
 class IBACopyGraph(IBALayer):
     """
-    Inject an IBALayer into an existing model by partially copying the model.
-    IBACopyGraph is very useful for pretrained models which you cannot alter
-    otherwise.  The main drawback is that changes to the original graph will
-    have no effect on the explanations.  Adding IBALayer directly to our model
-    might also be more memory efficient.
+    Injects an IBALayer into an existing model by partially copying the model.
+    IBACopyGraph is useful for pretrained models which model definition you cannot alter.
+    As tensorflow graphs are immutable, this class copies the original graph
+    partially (using ``tf.import_graph_def``).
+
+    .. warning ::
+        Changes to your model after calling ``IBACopyGraph`` have no effect on
+        the explanations. You need to call :meth:`.update_variables` to update
+        the variable values.  Coping the graph might also require more memory than
+        adding :class:`.IBALayer` to our model directly. We would recommend to always
+        use :class:`.IBALayer` if you can add it as a layer to your model.
+
+    Args:
+        feature (tf.tensor or str): tensor or name for the feature tensor to replace.
+        output_names: list of tensors or tensor names for the model outputs.
+            Useful to specify your model loss (see :meth:`.set_model_loss`).
+
+        estimator (TFWelfordEstimator): use this estimator.
+        feature_mean_std (tuple): tuple of estimated feature ``(mean, std)``.
+        graph: Graph of the ``feature`` and ``outputs`` tensor. If ``None``,
+            then the default graph is used.
+
+        session: TensorFlow session corresponding to the ``feature`` tensor. If
+            ``None``, the default session is used.
+
+        copy_session_config: Session config for the newly created session.
+        **keras_kwargs: layer kwargs, see ``keras.layers.Layer``.
     """
 
-    def __init__(self, feature_name, output_names,
+    def __init__(self, feature, outputs,
                  estimator=None,
                  feature_mean_std=None,
                  graph=None,
@@ -505,16 +722,23 @@ class IBACopyGraph(IBALayer):
         # _original_*   refer to objects from the original session
         # all other variables refer to objects in the copied graph
         #
-        if type(output_names) == str:
-            output_names = [output_names]
-        self._output_names = output_names
-        self._feature_name = feature_name
+        def to_name(x):
+            if type(x) == str:
+                return x
+            else:
+                return x.name
+
+        if type(outputs) not in [list, tuple]:
+            outputs = [outputs]
+        self._output_names = [to_name(out) for out in outputs]
+        self._feature_name = to_name(feature)
+
         self._original_output_names = self._output_names
         self._original_graph = graph or tf.get_default_graph()
         self._original_graph_def = self._original_graph.as_graph_def()
         self._original_session = session or K.get_session()
 
-        self._original_R = self._original_graph.get_tensor_by_name(feature_name)
+        self._original_R = self._original_graph.get_tensor_by_name(self._feature_name)
 
         if copy_session_config is None:
             copy_session_config = tf.ConfigProto(allow_soft_placement=True)
@@ -523,7 +747,7 @@ class IBACopyGraph(IBALayer):
                          feature_mean_std=feature_mean_std,
                          **keras_kwargs)
         if self._estimator is None and not self._feature_mean_std_given:
-            self._estimator = TFWelfordEstimator(feature_name, graph=self._original_graph)
+            self._estimator = TFWelfordEstimator(self._feature_name, graph=self._original_graph)
         # the new graph and session
         self._graph = tf.Graph()
         self._session = tf.Session(graph=self._graph, config=copy_session_config)
@@ -539,32 +763,56 @@ class IBACopyGraph(IBALayer):
             # here the original graph is copied an the feature is replaced
             imported_vars = tf.import_graph_def(
                 self._original_graph_def,
-                input_map={feature_name: self._Z},
+                input_map={self._feature_name: self._Z},
                 return_elements=self._original_output_names + [v.name for v in self._original_vars])
 
             self._outputs = imported_vars[:len(self._original_output_names)]
             self._imported_vars = imported_vars[1:]
             self._session.run(tf.global_variables_initializer())
 
-            var_values = self._original_session.run(self._original_vars)
-            assigns = [tf.assign(imported_var, val)
-                       for imported_var, val in zip(self._imported_vars, var_values)]
-            self._session.run(assigns)
+            self.update_variables()
+
+    def assert_variables_equal(self):
+        """
+        Asserts that all variables in the original graph and the copied graph have the same value.
+        """
+        original_values = self._original_session.run(self._original_vars)
+        imported_values = self._session.run(self._imported_vars)
+
+        for oval, ival, oten, iten in zip(original_values, imported_values,
+                                          self._original_vars, self._imported_vars):
+            assert (oval == ival).all()
+
+    def update_variables(self):
+        """
+        Copies the variable values from the original graph to the new copied graph.
+        If you modified your model, call this function.
+        """
+        var_values = self._original_session.run(self._original_vars)
+        assigns = [tf.assign(imported_var, val)
+                   for imported_var, val in zip(self._imported_vars, var_values)]
+        self._session.run(assigns)
 
     @contextmanager
     def copied_session_and_graph_as_default(self):
+        """Context manager that sets the copied gragh and session as default."""
         with self._session.as_default(), self._graph.as_default():
             yield
 
     def set_classification_loss(self):
+        """Sets a softmax cross entropy loss. Uses the first ``outputs`` tensor as logits."""
+        if len(self._outputs) != 1:
+            warnings.warn("You provided multiple model outputs. We assume the first is the logit. ")
         logits = self._outputs[0]
         with self.copied_session_and_graph_as_default():
             super().set_classification_loss(logits)
 
-    def feature_map_shape(self):
+    def feature_shape(self):
+        """ Returns the shape of the feature map."""
         return self._original_R.shape
 
     def get_feature(self, feed_dict):
+        """ Returns feature value given the inputs in ``feed_dict``."""
         return self._original_session.run(self._original_R, feed_dict=feed_dict)
 
     def analyze(self,
@@ -580,7 +828,33 @@ class IBACopyGraph(IBALayer):
                 session=None,
                 pass_mask=None,
                 progbar=False):
+        """
+        Returns the saliency map. This method executes an optimization to remove
+        information while retaining a low model loss.
 
+
+        Args:
+            feature_feed_dict (dict): TensorFlow feed_dict with all inputs to compute the
+                feature map. Placeholders must come from the original graph.
+            copy_feed_dict (dict): TensorFlow feed_dict with all inputs to compute the
+                final model output given the disturbed feature map. Placeholders must correspond
+                to the copied graph.
+            batch_size (int): number of samples to average the gradient.
+            steps (int): number of iterations to optimize.
+            beta (int): trade-off parameter between model loss and information loss.
+            learning_rate (float): Learning rate of the Adam optimizer.
+            min_std (float): Minimum feature standard derivation.
+            smooth_std (float): Smoothing of the lambda
+            normalize_beta (bool): Devide beta by the nubmer of neurons
+            session (tf.Session): TensorFlow session to  run the optimization
+            pass_mask (np.array): same shape as the feature map.
+                ``pass_mask`` masks neurons which are always passed to the next layer.
+                No noise is added if ``pass_mask == 0``.  For example, it might
+                be usefull if a variable lenght sequence is zero-padded.
+
+            progbar (bool): Flag to display progressbar.
+
+        """
         if not hasattr(self, '_optimizer'):
             self._build_optimizer()
 
@@ -593,9 +867,14 @@ class IBACopyGraph(IBALayer):
                 smooth_std=smooth_std, normalize_beta=normalize_beta,
                 session=self._session, pass_mask=pass_mask, progbar=progbar)
 
-    def predict(self, feature_feed_dict):
+    def predict(self, feed_dict):
+        """
+        Returns the ``outputs`` given inputs in ``feed_dict``. The placeholders
+        in ``feed_dict`` must correspond to the original graph. Useful to check
+        if the graph was copied correctly.
+        """
         feature = self._original_session.run(self._original_R,
-                                             feed_dict=feature_feed_dict)
+                                             feed_dict=feed_dict)
 
         with self.copied_session_and_graph_as_default():
             self._session.run([tf.assign(self._restrict_flow, False),
@@ -704,25 +983,57 @@ class _InnvestigateAPI:
 
 
 class IBACopyGraphInnvestigate(IBACopyGraph, _InnvestigateAPI):
+    """
+    This analyzer implements the `innvestigate API
+    <https://github.com/albermax/innvestigate>`_. It is handy, if your have
+    existing code written for the innvestigate package.  The innvestigate API has
+    some limitations. It assumes your model is a ``keras.Model`` and it only works
+    with classification.  For more flexibility, see the  :class:`.IBACopyGraph`.
+
+
+    .. warning ::
+        Changes to your model after calling ``IBACopyGraphInnvestigate`` have no
+        effect on the explanations. You need to call :meth:`.update_variables`
+        to update the variable values.  Coping the graph might also require more
+        memory than adding :class:`.IBALayer` to our model directly. We would
+        recommend to always use :class:`.IBALayer` if you can add it as a layer
+        to your model.
+
+
+    Args:
+        model (keras.Model): the explained model.
+        neuron_selection_mode (str): Mode to select the explained neuron. Must
+            be one of ``"max_activation"``, ``"index"``, ``"all"``.
+        estimator (TFWelfordEstimator): feature mean and std. estimator.
+        feature_mean_std (tuple): tuple of estimated feature ``(mean, std)``.
+        session: TensorFlow session corresponding to the ``model``. If
+            ``None``, the default session is used.
+        copy_session_config: Session config for the newly created session.
+        disable_model_checks: Not used by IBA.
+        **keras_kwargs: layer kwargs, see ``keras.layers.Layer``.
+
+    """
     def __init__(self, model,
                  neuron_selection_mode='max_activation',
                  feature_name=None,
                  estimator=None, feature_mean_std=None,
                  session=None,
                  copy_session_config=None,
-                 disable_model_checks=False,):
+                 disable_model_checks=False,
+                 **keras_kwargs):
         if contains_activation(model.layers[-1], 'softmax'):
             raise ValueError("The model should not contain a softmax activation. "
                              "Please use the model_wo_softmax function!")
         output_names = [model.output.name]
         graph = model.input.graph
         IBACopyGraph.__init__(self, feature_name, output_names, estimator, feature_mean_std,
-                              graph, session, copy_session_config)
+                              graph, session, copy_session_config, **keras_kwargs)
         _InnvestigateAPI.__init__(self, model, neuron_selection_mode)
         with self.copied_session_and_graph_as_default():
             IBALayer.set_classification_loss(self, self._outputs[0])
 
     def fit(self, X, session=None, run_kwargs={}):
+
         session = session or self._original_session
         super().fit({self._model.input: X}, session, run_kwargs)
 
@@ -752,7 +1063,8 @@ class IBACopyGraphInnvestigate(IBACopyGraph, _InnvestigateAPI):
 
         Args:
             X: batch of samples
-            neuron_selection: which neuron to explain. Requires neuron_selection_mode == index
+            neuron_selection: which neuron to explain.
+                Requires ``neuron_selection_mode == index``.
         """
         if(neuron_selection is not None and
            self._neuron_selection_mode != "index"):
