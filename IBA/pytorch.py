@@ -290,13 +290,6 @@ class IBA(nn.Module):
             self._interrupt_execution = False
 
     @staticmethod
-    def _sample_z(mu, log_noise_var):
-        """ Return mu with additive noise """
-        noise_std = (log_noise_var / 2).exp()
-        eps = mu.data.new(mu.size()).normal_()
-        return mu + noise_std * eps
-
-    @staticmethod
     def _calc_capacity(mu, log_var):
         """ Return the feature-wise KL-divergence of p(z|x) and q(z) """
         return -0.5 * (1 + log_var - mu**2 - log_var.exp())
@@ -305,6 +298,15 @@ class IBA(nn.Module):
         """ Selectively remove information from x by applying noise """
         if self.alpha is None:
             raise RuntimeWarning("Alpha not initialized. Run _init() before using the bottleneck.")
+
+        if self._mean is None:
+            self._mean = self.estimator.mean()
+
+        if self._std is None:
+            self._std = self.estimator.std()
+
+        if self._active_neurons is None:
+            self._active_neurons = self.estimator.active_neurons()
 
         # Smoothen and expand alpha on batch dimension
         lamb = self.sigmoid(alpha)
@@ -369,13 +371,17 @@ class IBA(nn.Module):
 
         """
         try:
-            import tqdm
+            from tqdm.auto import tqdm
         except ImportError:
-            progbar = False
-        if progbar == 'notebook':
-            dataloader = tqdm.tqdm_notebook(dataloader, total=n_samples//dataloader.batch_size+1)
-        elif progbar:
-            dataloader = tqdm.tqdm(dataloader, total=n_samples//dataloader.batch_size+1)
+            try:
+                from tqdm import tqdm
+            except:
+                if progbar:
+                    warnings.warn("Cannot load tqdm! Sorry, not progress bar")
+                    progbar = False
+
+        if progbar:
+            dataloader = tqdm(dataloader, total=n_samples)
         if device is None:
             device = next(iter(model.parameters())).device
         if reset:
@@ -386,6 +392,8 @@ class IBA(nn.Module):
                 break
             with torch.no_grad(), self.interrupt_execution(), self.enable_estimation():
                 model(imgs.to(device))
+            if progbar:
+                dataloader.update(self.estimator.n_samples())
 
         # Cache results
         self._mean = self.estimator.mean()
