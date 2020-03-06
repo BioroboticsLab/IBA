@@ -1,7 +1,9 @@
-# Per-Sample Bottleneck
+# IBA: Informational Bottlenecks for Attribution
 
-This repository contains an easy-to-use pytorch implementation for the Per-Sample Bottleneck for
-attribution. See our paper for more detail: ["Restricting the Flow: Information Bottlenecks for Attribution"](https://openreview.net/forum?id=S1xWh1rYwB). In the notebook [example.ipynb](example.ipynb), the Per-Sample Bottleneck is
+This repository contains an easy-to-use implementation for the IBA attribution method.
+See our paper for a description: ["Restricting the Flow: Information Bottlenecks for Attribution"](https://openreview.net/forum?id=S1xWh1rYwB). We provide a TensorFlow and a PyTorch implementation.
+
+In the notebook [example.ipynb](example.ipynb), the Per-Sample Bottleneck is
 applied to pretrained ImageNet networks.
 
 A short usage-description:
@@ -32,15 +34,27 @@ btln.estimate(model, datagen)
 
 You can either install it directly from git:
 ```bash
-$ pip install git+https://github.com/attribution-bottleneck/per-sample-bottleneck
+$ pip install git+https://github.com/berleon/IBA
+```
+To install the dependencies for `torch`, `tensorflow`, `tensorflow-gpu` or developement `dev`,
+use:
+```bash
+$ pip install git+https://github.com/berleon/IBA[torch, dev]
 ```
 
-Or clone this repository locally and then install it:
+You can also clone the repository locally and then install the development
+version:
 ```bash
 $ git clone https://github.com/attribution-bottleneck/per-sample-bottleneck
 $ cd per-sample-bottlneck
 $ pip install .
 ```
+
+## Supported PyTorch and TensorFlow versions
+
+We support tensorflow from `1.12.0` to `1.15.0`.
+You might also be able to use our code from tensorflow 2 using the backward capatibility.
+We currently not plan to support tensorflow 2.
 
 ## Reference
 

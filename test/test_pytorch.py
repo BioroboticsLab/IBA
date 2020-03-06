@@ -1,7 +1,9 @@
+import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from IBA.pytorch import IBA
+from packaging import version
 
 
 class Net(nn.Module):
@@ -26,7 +28,11 @@ class Net(nn.Module):
 
 def test_pytorch():
     net = Net()
-    iba = IBA(net.conv2)
+    if version.parse(torch.__version__) < version.parse("1.2.0"):
+        iba = IBA()
+        net.conv2 = nn.Sequential(net.conv2, iba)
+    else:
+        iba = IBA(net.conv2)
 
     x = torch.randn(2, 3, 32, 32)
     with torch.no_grad(), iba.interrupt_execution(), iba.enable_estimation():
@@ -47,10 +53,25 @@ def test_pytorch():
     img = torch.randn(1, 3, 32, 32)
     iba.heatmap(img, lambda x: -torch.log_softmax(net(x), 1)[:, 0].mean())
 
-    iba.detach()
+    x = torch.randn(2, 3, 32, 32)
+    out = net(x)
 
-    # no influence after detach
-    with iba.supress_information():
-        out_with_noise = net(x)
+    if version.parse(torch.__version__) < version.parse("1.2.0"):
+        with pytest.raises(ValueError):
+            iba.detach()
 
-    assert (out == out_with_noise).any()
+        with iba.supress_information():
+            out_with_noise = net(x)
+        assert (out != out_with_noise).any()
+
+    else:
+        iba.detach()
+
+        # no influence after detach
+        with iba.supress_information():
+            out_with_noise = net(x)
+
+        assert (out == out_with_noise).all()
+
+    with pytest.raises(ValueError):
+        iba.detach()

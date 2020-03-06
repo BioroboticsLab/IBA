@@ -23,10 +23,12 @@ setuptools.setup(
             'torchvision',
         ],
         'tensorflow': [
-            'tensorflow>=1.12.0'
+            'tensorflow>=1.12.0, <2.0',
+            'keras<2.3.0',
         ],
         'tensorflow-gpu': [
-            'tensorflow-gpu>=1.12.0'
+            'tensorflow-gpu>=1.12.0, <2.0'
+            'keras<2.3.0',
         ],
     },
     python_requires='>=3.6',

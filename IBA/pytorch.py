@@ -206,7 +206,7 @@ class IBA(nn.Module):
         self._active_neurons_threshold = active_neurons_threshold
         self._supress_information = False
         self._interrupt_execution = False
-        self._hook_handle = False
+        self._hook_handle = None
 
         # Check if modifying forward hooks are supported by the current torch version
         if layer is not None:
@@ -254,9 +254,11 @@ class IBA(nn.Module):
 
     def detach(self):
         """ Remove the bottleneck to restore the original model """
-        if self._hook_handle:
+        if self._hook_handle is not None:
             self._hook_handle.remove()
             self._hook_handle = None
+        else:
+            raise ValueError("Cannot detach hock. Either you never attached or already detached.")
 
     def forward(self, x):
         if self._supress_information:
