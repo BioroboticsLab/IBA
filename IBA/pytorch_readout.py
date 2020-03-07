@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from decorator import contextmanager
+from torch.nn import ModuleList
 
 from IBA.pytorch import IBA, TorchWelfordEstimator
 
@@ -22,17 +23,22 @@ class IBAReadout(IBA):
     def __init__(self, attach_layer, readout_layers, model, **kwargs):
         super().__init__(attach_layer, **kwargs)
         self.layers = readout_layers
-        self.model = model  # used for the nested pass
-        self._readout_estimators = [TorchWelfordEstimator() for _ in readout_layers]
+        self._readout_estimators = ModuleList([TorchWelfordEstimator() for _ in self.layers])
         # The recorded intermediate activations
         self._readout_values = [None for _ in readout_layers]
         self._readout_hooks = [None for _ in readout_layers]  # Registered hooks
         self._input_hook = None  # To record the input
         self._last_input = None  # Used as input for the nested forward pass
         self._nested_pass = False
+        self._alpha_bound = 5
+
+        # The model is used for the nested pass but we do not want to train or
+        # save it with the IBA.  So it should not show up in iba.parameters() or
+        # iba.state_dict() and is not added as member.
+        self._model_fn = lambda x: model(x)
 
         # Attach additional hooks to capture input and readout
-        self._attach_input_hook()
+        self._attach_input_hook(model)
         self._attach_readout_hooks()
 
     def _init(self):
@@ -96,7 +102,7 @@ class IBAReadout(IBA):
             # Attach the hook
             self._readout_hooks[i] = layer.register_forward_hook(create_read_hook(i))
 
-    def _attach_input_hook(self):
+    def _attach_input_hook(self, model):
         """
         Attach a pre-hook to the model to capture the input. It will be used
         again as model input for the nested pass to obtain the feature maps.
@@ -104,12 +110,12 @@ class IBAReadout(IBA):
         def input_hook(module, inputs):
             if self._supress_information and not self._nested_pass:
                 self._last_input = inputs[0].clone()
-        self._input_hook = self.model.register_forward_pre_hook(input_hook)
+        self._input_hook = model.register_forward_pre_hook(input_hook)
 
     def reset_estimate(self):
         """ Additionaly reset estimators of bottleneck layers. """
         super().reset_estimate()
-        self._readout_estimators = [TorchWelfordEstimator() for _ in self.layers]
+        self._readout_estimators = ModuleList([TorchWelfordEstimator() for _ in self.layers])
 
     def forward(self, x):
         if self._supress_information:
@@ -133,7 +139,7 @@ class IBAReadout(IBA):
         """
         # Run a nested pass to obtain feature maps, stored in self._readout_values
         with self.nested_pass():
-            self.model(self._last_input)
+            self._model_fn(self._last_input)
 
         # Normalize using the estimators
         readouts = [(r - e.mean()) / e.std()
@@ -157,6 +163,9 @@ class IBAReadout(IBA):
         alpha = self.conv2(alpha)
         alpha = self.relu(alpha)
         alpha = self.conv3(alpha)
+
+        # Keep alphas in a meaningful range during training
+        alpha.clamp(-self._alpha_bound, self._alpha_bound)
 
         return alpha
 
