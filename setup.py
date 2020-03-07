@@ -2,11 +2,11 @@ import setuptools
 
 setuptools.setup(
     name="iba",
-    version="0.0.1",
+    version="0.1.0",
     author="Karl Schulz, Leon Sixt",
     author_email="",
     license='MIT',
-    description="Implementation of the Attribution Bottleneck",
+    description="Information Bottlenecks for Attribution (IBA)",
     packages=setuptools.find_namespace_packages(include=['IBA.*']),
     install_requires=['numpy', 'scikit-image', 'tqdm', 'pytest'],
     extras_require={

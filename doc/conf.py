@@ -233,6 +233,10 @@ htmlhelp_basename = ''
 # -- Options for LaTeX output ---------------------------------------------
 
 latex_elements = {
+    'inputenc': '',
+    'utf8extra': '',
+    'preamble': '''
+    ''',
     # The paper size ('letterpaper' or 'a4paper').
     # 'papersize': 'letterpaper',
 
@@ -254,6 +258,7 @@ latex_documents = [
      u'', 'manual'),
 ]
 
+latex_engine = 'xelatex'
 # The name of an image file (relative to this directory) to place at the top of
 # the title page.
 # latex_logo = None

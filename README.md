@@ -1,34 +1,38 @@
 # IBA: Informational Bottlenecks for Attribution
 
 This repository contains an easy-to-use implementation for the IBA attribution method.
-See our paper for a description: ["Restricting the Flow: Information Bottlenecks for Attribution"](https://openreview.net/forum?id=S1xWh1rYwB). We provide a TensorFlow and a PyTorch implementation.
+See our paper for a description: ["Restricting the Flow: Information Bottlenecks for Attribution"](https://openreview.net/forum?id=S1xWh1rYwB). We provide a [TensorFlow v1](https://www.tensorflow.org/) and a [PyTorch](https://pytorch.org/) implementation.
 
-In the notebook [example.ipynb](example.ipynb), the Per-Sample Bottleneck is
-applied to pretrained ImageNet networks.
 
-A short usage-description:
+Examplary usage (PyTorch):
 
 ```python
-# Create the Per-Sample Bottleneck:
-btln = IBA()
+from IBA.pytorch import IBA
+from IBA.utils import plot_saliency_map
 
-# Add it to your model
-btln.attach(model.conv4)
+model = Net()
+# Create the Per-Sample Bottleneck:
+iba = IBA(model.conv4)
 
 # Estimate the mean and variance.
-btln.estimate(model, datagen)
+iba.estimate(model, datagen)
+
+img, target = next(iter(datagen(batch_size=1)))
 
 # Closure that returns the loss for one batch
-model_loss_closure = lambda x: -torch.log_softmax(model(x), 1)[:, target].mean()
+model_loss_closure = lambda x: F.nll_loss(F.log_softmax(model(x), target)
 
-# Create the heatmap
-heatmap = btln.heatmap(img[None].to(dev), model_loss_closure)
-
-# If you train your model, input distribution changes and you have to re-estimate the mean and std.
-train(model)
-btln.reset_estimate()
-btln.estimate(model, datagen)
+# Explain class target for the given image
+salienct_map = iba.analyze(img.to(dev), model_loss_closure)
+plot_saliency_map(img.to(dev))
 ```
+
+
+## Documentation
+
+The API documentation is hosted here.
+
+TODO: mention the different notebooks
 
 ## Installation
 
@@ -36,25 +40,28 @@ You can either install it directly from git:
 ```bash
 $ pip install git+https://github.com/berleon/IBA
 ```
+
 To install the dependencies for `torch`, `tensorflow`, `tensorflow-gpu` or developement `dev`,
-use:
+use the following syntax:
 ```bash
 $ pip install git+https://github.com/berleon/IBA[torch, dev]
 ```
 
-You can also clone the repository locally and then install the development
-version:
+For development,yYou can also clone the repository locally and then install in development
+mode:
 ```bash
 $ git clone https://github.com/attribution-bottleneck/per-sample-bottleneck
 $ cd per-sample-bottlneck
-$ pip install .
+$ pip install -e .
 ```
 
 ## Supported PyTorch and TensorFlow versions
 
 We support tensorflow from `1.12.0` to `1.15.0`.
-You might also be able to use our code from tensorflow 2 using the backward capatibility.
-We currently not plan to support tensorflow 2.
+Although we currently not plan to support tensorflow 2,
+it might be possible to use our code from tensorflow 2 using the backward capatibility wrapper.
+
+For PyTorch, we support version `1.1.0` to `1.4.0`.
 
 ## Reference
 
