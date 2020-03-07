@@ -41,8 +41,8 @@ class IBAReadout(IBA):
         self._attach_input_hook(model)
         self._attach_readout_hooks()
 
-    def _init(self):
-        super()._init()
+    def _build(self):
+        super()._build()
         # Use the estimators to get feature map dimensions
         features_in = sum(map(lambda e: e.shape[0], self._readout_estimators))
         features_out = self.estimator.shape[-3]
@@ -115,7 +115,7 @@ class IBAReadout(IBA):
     def reset_estimate(self):
         """ Additionaly reset estimators of bottleneck layers. """
         super().reset_estimate()
-        self._readout_estimators = ModuleList([TorchWelfordEstimator() for _ in self.layers])
+        self._readout_estimators = ModuleList([self._estimator_type() for _ in self.layers])
 
     def forward(self, x):
         if self._supress_information:

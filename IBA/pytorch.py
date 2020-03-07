@@ -182,6 +182,7 @@ class IBA(nn.Module):
                  batch_size=10,
                  initial_alpha=5.0,
                  active_neurons_threshold=0.01,
+                 estimator=None,
                  progbar=False,
                  relu=False):
         super().__init__()
@@ -197,7 +198,7 @@ class IBA(nn.Module):
         self.sigmoid = nn.Sigmoid()
         self.buffer_capacity = None  # Filled on forward pass, used for loss
         self.sigma = sigma
-        self.estimator = TorchWelfordEstimator()
+        self.estimator = estimator or TorchWelfordEstimator()
         self.device = None
         self._estimate = False
         self._mean = None
@@ -233,7 +234,7 @@ class IBA(nn.Module):
         with torch.no_grad():
             self.alpha.fill_(self.initial_alpha)
 
-    def _init(self):
+    def _build(self):
         """
         Initialize alpha with the same shape as the features.
         We use the estimator to obtain shape and device.
@@ -404,7 +405,7 @@ class IBA(nn.Module):
         # After estimaton, feature map dimensions are known and
         # we can initialize alpha and the smoothing kernel
         if self.alpha is None:
-            self._init()
+            self._build()
 
     @contextmanager
     def supress_information(self):
@@ -487,8 +488,11 @@ class IBA(nn.Module):
         return self._current_heatmap(input_t.shape[2:])
 
     def capacity(self):
-        """ Returns a tensor with the currenct capacity from the last input.
-        Shape is ``(self.channels, self.height, self.width)`` """
+        """
+        Returns a tensor with the currenct capacity from the last input, averaged
+        over the redundant batch dimension.
+        Shape is ``(self.channels, self.height, self.width)``
+        """
         return self.buffer_capacity.mean(dim=0)
 
     def _current_heatmap(self, shape=None):
