@@ -99,8 +99,10 @@ def to_saliency_map(capacity, shape=None, data_format='NCHW'):
     """
     if data_format == 'NCHW':
         saliency_map = np.nansum(capacity, 0)
-    if data_format == 'NHWC':
+    elif data_format == 'NHWC':
         saliency_map = np.nansum(capacity, -1)
+    else:
+        raise ValueError
 
     # to bits
     saliency_map /= float(np.log(2))

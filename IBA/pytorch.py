@@ -425,7 +425,7 @@ class IBA(nn.Module):
         finally:
             self._supress_information = False
 
-    def heatmap(self, input_t, model_loss_fn,
+    def analyze(self, input_t, model_loss_fn,
                 beta=None, optimization_steps=None, min_std=None,
                 lr=None, batch_size=None, active_neurons_threshold=0.01):
         """

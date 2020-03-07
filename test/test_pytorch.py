@@ -51,7 +51,7 @@ def test_pytorch():
     assert (out != out_with_noise).any()
 
     img = torch.randn(1, 3, 32, 32)
-    iba.heatmap(img, lambda x: -torch.log_softmax(net(x), 1)[:, 0].mean())
+    iba.analyze(img, lambda x: -torch.log_softmax(net(x), 1)[:, 0].mean())
 
     x = torch.randn(2, 3, 32, 32)
     out = net(x)

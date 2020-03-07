@@ -20,10 +20,11 @@ class IBAReadout(IBA):
     - additional hooks to collect the input and the feature maps in the nested pass
     - a readout network of three 1x1 conv. layers to yield alpha
     """
-    def __init__(self, attach_layer, readout_layers, model, **kwargs):
+    def __init__(self, attach_layer, readout_layers, model, estimator_type=None, **kwargs):
         super().__init__(attach_layer, **kwargs)
         self.layers = readout_layers
-        self._readout_estimators = ModuleList([TorchWelfordEstimator() for _ in self.layers])
+        self._estimator_type = estimator_type or TorchWelfordEstimator
+        self._readout_estimators = ModuleList([self._estimator_type() for _ in self.layers])
         # The recorded intermediate activations
         self._readout_values = [None for _ in readout_layers]
         self._readout_hooks = [None for _ in readout_layers]  # Registered hooks
@@ -69,7 +70,7 @@ class IBAReadout(IBA):
             [h.detach() for h in self._readout_hooks]
             self._readout_hooks = [None for _ in self._readout_hooks]
 
-    def heatmap(self, input_t, model, **kwargs):
+    def analyze(self, input_t, model, **kwargs):
         if len(kwargs) > 0:
             warnings.warn(f"Additional arguments ({list(kwargs.keys())}) "
                           " are ignored in the Readout IBA.")
