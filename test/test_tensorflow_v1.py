@@ -41,9 +41,6 @@ from keras.layers import Dense, Dropout, Activation, Flatten
 from keras.layers import Conv2D, MaxPooling2D
 from keras.layers import Conv1D, MaxPooling1D
 
-
-from keras.applications import MobileNetV2
-
 from IBA.tensorflow_v1 import model_wo_softmax, IBACopyGraph, IBACopyGraphInnvestigate
 from IBA.tensorflow_v1 import IBALayer, to_saliency_map
 
@@ -51,15 +48,7 @@ from IBA.tensorflow_v1 import IBALayer, to_saliency_map
 INPUT_SHAPE = (32, 32, 3)
 
 
-@pytest.fixture
-def mobilenet():
-    K.clear_session()
-    model_softmax = MobileNetV2(alpha=0.35, input_shape=INPUT_SHAPE, weights='imagenet')
-    model = model_wo_softmax(model_softmax)
-    return model
-
-
-def simple_model(with_iba):
+def simple_model(with_iba, with_softmax=False):
 
     model = Sequential()
 
@@ -84,13 +73,21 @@ def simple_model(with_iba):
     model.add(Dense(64, name='fc1'))
     model.add(Activation('relu', name='relu5'))
     model.add(Dropout(0.5, name='dropout2'))
-    model.add(Dense(10, name='fc2'))
+    if with_softmax:
+        softmax = 'softmax'
+    else:
+        softmax = None
+    model.add(Dense(10, name='fc2',  activation=softmax))
     return model
 
 
 def test_iba_layer(tmpdir):
     K.clear_session()
-    model = simple_model(with_iba=True)
+    model = simple_model(with_iba=True, with_softmax=True)
+
+    # check if softmax is removed
+    model = model_wo_softmax(model)
+
     x = np.random.uniform(size=(10, 32, 32, 3))
 
     model.predict(x)
