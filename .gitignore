@@ -8,6 +8,8 @@ experiments/
 figures/
 cov_html/
 notebooks/imagenet
+notebooks/check_sha256sum.txt
+*.h5
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

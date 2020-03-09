@@ -27,11 +27,10 @@ import numpy as np
 import torch.nn as nn
 import torch
 import warnings
-from tqdm import tqdm
 from contextlib import contextmanager
 from skimage.transform import resize
 from torchvision.transforms import Normalize, Compose
-from IBA.utils import _to_saliency_map
+from IBA.utils import _to_saliency_map, get_tqdm
 
 # Helper Functions
 
@@ -395,7 +394,7 @@ class IBA(nn.Module):
         """
         self.estimator = TorchWelfordEstimator()
 
-    def estimate(self, model, dataloader, device=None, n_samples=10000, progbar=False, reset=True):
+    def estimate(self, model, dataloader, device=None, n_samples=10000, progbar=None, reset=True):
         """ Estimate mean and variance using the welford estimator.
             Usually, using 10.000 i.i.d. samples gives decent estimates.
 
@@ -410,15 +409,14 @@ class IBA(nn.Module):
                 reset (bool): reset the current estimate of the mean and std
 
         """
+        progbar = progbar or self.progbar
+
         try:
-            from tqdm.auto import tqdm
+            tqdm = get_tqdm()
         except ImportError:
-            try:
-                from tqdm import tqdm
-            except ImportError:
-                if progbar:
-                    warnings.warn("Cannot load tqdm! Sorry, no progress bar")
-                    progbar = False
+            if progbar:
+                warnings.warn("Cannot load tqdm! Sorry, no progress bar")
+                progbar = False
 
         if progbar:
             dataloader = tqdm(dataloader, total=n_samples)
@@ -433,7 +431,9 @@ class IBA(nn.Module):
             with torch.no_grad(), self.interrupt_execution(), self.enable_estimation():
                 model(imgs.to(device))
             if progbar:
-                dataloader.update(self.estimator.n_samples())
+                dataloader.update(len(imgs))
+        if progbar:
+            dataloader.close()
 
         # Cache results
         self._mean = self.estimator.mean()
@@ -507,9 +507,18 @@ class IBA(nn.Module):
         self._loss = []
         self._model_loss = []
         self._information_loss = []
+
+        opt_range = range(optimization_steps)
+        try:
+            tqdm = get_tqdm()
+            opt_range = tqdm(opt_range, desc="Training Bottleneck", disable=not self.progbar)
+        except ImportError:
+            if progbar:
+                warnings.warn("Cannot load tqdm! Sorry, no progress bar")
+                self.progbar = False
+
         with self.supress_information():
-            for _ in tqdm(range(optimization_steps), desc="Training Bottleneck",
-                          disable=not self.progbar):
+            for _ in opt_range:
                 optimizer.zero_grad()
                 model_loss = model_loss_fn(batch)
                 # Taking the mean is equivalent of scaling the sum with 1/K

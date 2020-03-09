@@ -2,14 +2,17 @@
 
 [[Paper]](https://openreview.net/forum?id=S1xWh1rYwB) | [[API Documentation]](TODO) |  [[Examples]](TODO) | [[Installation]](#installation)
 
-<p align="center"> 
+<p align="center">
     <img alt="Example GIF" width="300" src="https://github.com/BioroboticsLab/IBA-paper-code/raw/master/monkeys.gif"><br>
     Iterations of the Per-Sample Bottleneck
 </p>
 
 
 This repository contains an easy-to-use implementation for the IBA attribution method.
-See our paper for a description: ["Restricting the Flow: Information Bottlenecks for Attribution"](https://openreview.net/forum?id=S1xWh1rYwB). We provide a [TensorFlow v1](https://www.tensorflow.org/) and a [PyTorch](https://pytorch.org/) implementation.
+See our paper for a description: ["Restricting the Flow: Information
+Bottlenecks for Attribution"](https://openreview.net/forum?id=S1xWh1rYwB). We
+provide a [TensorFlow v1](https://www.tensorflow.org/) and
+a [PyTorch](https://pytorch.org/) implementation.
 
 
 
@@ -85,7 +88,7 @@ For PyTorch, we support version `1.1.0` to `1.4.0`.
 
 TODO: Comment on the levels of support, we can provide.
 
-TODO: Contributions? 
+TODO: Contributions?
 
 TODO: Wanted Contributions? Other examples than images / imagenet?
 

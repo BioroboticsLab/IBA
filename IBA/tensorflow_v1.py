@@ -62,10 +62,8 @@ import tensorflow_probability as tfp
 
 import numpy as np
 import keras
-from IBA.utils import WelfordEstimator, _to_saliency_map
+from IBA.utils import WelfordEstimator, _to_saliency_map, get_tqdm
 import keras.backend as K
-from tqdm import trange
-from tqdm.auto import tqdm
 from IBA._keras_graph import contains_activation
 
 # expose for importing
@@ -114,7 +112,13 @@ class TFWelfordEstimator(WelfordEstimator):
             run_kwargs (dict): additional kwargs to ``session.run``.
             progbar (bool): flag to show progress bar.
         """
-        for feed_dict in tqdm(generator, progbar=progbar):
+        try:
+            tqdm = get_tqdm()
+            progbar = tqdm(generator, progbar=progbar)
+        except ImportError:
+            progbar = generator
+
+        for feed_dict in progbar:
             self.fit(feed_dict, session, run_kwargs)
 
     def state_dict(self) -> dict:
@@ -457,7 +461,7 @@ class IBALayer(keras.layers.Layer):
         self.target = tf.get_variable('iba_target', dtype=tf.int32, initializer=[1])
 
         target_one_hot = tf.one_hot(self.target, depth=logits.shape[-1])
-        loss_ce = tf.nn.softmax_cross_entropy_with_logits(
+        loss_ce = tf.nn.softmax_cross_entropy_with_logits_v2(
             labels=target_one_hot,
             logits=logits,
             name='cross_entropy'
@@ -525,8 +529,15 @@ class IBALayer(keras.layers.Layer):
             run_kwargs: additional kwargs to ``session.run``.
         """
 
-        for step, feed_dict in enumerate(tqdm(
-                generator, disable=not progbar, desc="[Fit Estimator]")):
+        try:
+            tqdm = get_tqdm()
+            gen = tqdm(generator, disable=not progbar, desc="[Fit Estimator]")
+        except ImportError:
+            if progbar:
+                warnings.warn("Cannot load tqdm! Sorry, no progress bar")
+            gen = generator
+
+        for step, feed_dict in enumerate(gen):
             self._estimator.fit(feed_dict, session=session, run_kwargs=run_kwargs)
             if self._estimator.n_samples() >= n_samples:
                 break
@@ -653,7 +664,16 @@ class IBALayer(keras.layers.Layer):
         else:
             self._log['init'] = OrderedDict()
 
-        for step in trange(steps, disable=not progbar):
+        try:
+            tqdm = get_tqdm()
+            steps_progbar = tqdm(range(steps), total=steps,
+                                 disable=not progbar, desc="[Fit Estimator]")
+        except ImportError:
+            if progbar:
+                warnings.warn("Cannot load tqdm! Sorry, no progress bar")
+            steps_progbar = range(steps)
+
+        for step in steps_progbar:
             outs = session.run(
                 [self._optimizer_step] + list(report_tensors.values()),
                 feed_dict=feed_dict)
@@ -1064,10 +1084,15 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
                 except TypeError:
                     total = None
 
-            for step, (imgs, targets) in enumerate(tqdm(
-                    maybe_sliced_gen, total=total, disable=verbose == 0,
-                    desc="[Fit Estimator, epoch {}]".format(epoch))):
+            try:
+                tqdm = get_tqdm()
+                gen_progbar = tqdm(maybe_sliced_gen, total=total, disable=verbose == 0,
+                                   desc="[Fit Estimator, epoch {}]".format(epoch))
+            except ImportError:
+                if verbose == 1:
+                    warnings.warn("Cannot load tqdm! Sorry, no progress bar")
 
+            for step, (imgs, targets) in enumerate(gen_progbar):
                 feed_dict = {self._model.input: imgs}
                 self._estimator.fit(feed_dict, session=session)
 

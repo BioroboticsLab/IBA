@@ -142,22 +142,36 @@ def _to_saliency_map(capacity, shape=None, data_format='channels_last'):
         return saliency_map
 
 
-def plot_saliency_map(saliency_map, img=None, ax=None, label='Bits / Pixel',
+def get_tqdm():
+    """Tries to import ``tqdm`` from ``tqdm.auto`` if fails uses cli ``tqdm``."""
+    try:
+        from tqdm.auto import tqdm
+        return tqdm
+    except ImportError:
+        from tqdm import tqdm
+        return tqdm
+
+
+def plot_saliency_map(saliency_map, img=None, ax=None,
+                      colorbar_label='Bits / Pixel',
+                      colorbar_fontsize=14,
                       min_alpha=0.2, max_alpha=0.7, vmax=None,
                       colorbar_size=0.3, colorbar_pad=0.08):
+
     """
     Plots the heatmap with an bits/pixel colorbar and optionally overlays the image.
 
     Args:
-        saliency_map: np.ndarray the saliency_map
-        img: np.ndarray show this image under the saliency_map
-        ax: matplotlib axis. If ``None``, a new plot is created
-        label: label for the colorbar
-        min_alpha: minimum alpha value for the overlay. only used if ``img`` is given
-        max_alpha: maximum alpha value for the overlay. only used if ``img`` is given
-        vmax: maximum value for colorbar
-        colorbar_size: width of the colorbar. default: Fixed(0.3)
-        colorbar_pad: width of the colorbar. default: Fixed(0.08)
+        saliency_map (np.ndarray): the saliency_map.
+        img (np.ndarray):  show this image under the saliency_map.
+        ax: matplotlib axis. If ``None``, a new plot is created.
+        colorbar_label (str): label for the colorbar.
+        colorbar_fontsize (int): fontsize of the colorbar label.
+        min_alpha (float): minimum alpha value for the overlay. only used if ``img`` is given.
+        max_alpha (float): maximum alpha value for the overlay. only used if ``img`` is given.
+        vmax: maximum value for colorbar.
+        colorbar_size: width of the colorbar. default: Fixed(0.3).
+        colorbar_pad: width of the colorbar. default: Fixed(0.08).
 
     Returns:
         The matplotlib axis ``ax``.
@@ -192,7 +206,7 @@ def plot_saliency_map(saliency_map, img=None, ax=None, label='Bits / Pixel',
         hmap_jet[:, :, -1] = (max_alpha - min_alpha)*norm(saliency_map) + min_alpha
     ax.imshow(hmap_jet, alpha=1.)
     cbar = mpl.colorbar.ColorbarBase(cax1, cmap=cmap, norm=norm)
-    cbar.set_label(label, fontsize=16)
+    cbar.set_label(colorbar_label, fontsize=colorbar_fontsize)
 
     ax.set_xticks([])
     ax.set_yticks([])
