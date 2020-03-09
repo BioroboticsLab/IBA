@@ -27,9 +27,9 @@
 As IBA adds noise to an intermediate layer's output, the
 existing model has to be modified. Either you can add the :class:`.IBALayer` as a layer
 directly in your model or we partially copy your model (using
-``tf.import_graph_def``) with :class:`.IBACopyGraph`. We also provide a wrapper
+``tf.import_graph_def``) with :class:`.IBACopy`. We also provide a wrapper
 of the `innvestigate <https://github.com/albermax/innvestigate>`_ API:
-:class:`.IBACopyGraph`.
+:class:`.IBACopy`.
 For examples, see also the `notebook directory
 <https://github.com/BioroboticsLab/IBA/tree/master/notebooks>`_.
 
@@ -40,9 +40,9 @@ For examples, see also the `notebook directory
 +===================================+==============+=================+============+
 | :class:`.IBALayer`                |   Any        |     ✅          |      ❌    |
 +-----------------------------------+--------------+-----------------+------------+
-| :class:`.IBACopyGraph`            |   Any        |     ❌          |      ✅    |
+| :class:`.IBACopy`                 |   Any        |     ❌          |      ✅    |
 +-----------------------------------+--------------+-----------------+------------+
-| :class:`.IBACopyGraphInnvestigate`|Classification|     ❌          |      ✅    |
+| :class:`.IBACopyInnvestigate`     |Classification|     ❌          |      ✅    |
 +-----------------------------------+--------------+-----------------+------------+
 
 
@@ -228,7 +228,7 @@ class IBALayer(keras.layers.Layer):
     A keras layer that can be included in your model.
     This class should work with any model and does not copy the tensorflow graph.
     If you cannot alter you model definition, you have to copy the graph (use
-    :class:`.IBACopyGraph`, the :class:`.IBACopyGraphInnvestigate`).
+    :class:`.IBACopy`, the :class:`.IBACopyInnvestigate`).
 
     Example:  ::
 
@@ -440,7 +440,7 @@ class IBALayer(keras.layers.Layer):
 
     def get_copied_outputs(self):
         """Returns the copied model outputs provided in the
-        :class:`the constructor <.IBACopyGraph>`."""
+        :class:`the constructor <.IBACopy>`."""
         return self._outputs
 
     def set_classification_loss(self, logits, optimizer_cls=tf.train.AdamOptimizer):
@@ -690,15 +690,15 @@ class IBALayer(keras.layers.Layer):
         self._feature_std = state['feature_std']
 
 
-class IBACopyGraph(IBALayer):
+class IBACopy(IBALayer):
     """
     Injects an IBALayer into an existing model by partially copying the model.
-    IBACopyGraph is useful for pretrained models which model definition you cannot alter.
+    IBACopy is useful for pretrained models which model definition you cannot alter.
     As tensorflow graphs are immutable, this class copies the original graph
     partially (using ``tf.import_graph_def``).
 
     .. warning ::
-        Changes to your model after calling ``IBACopyGraph`` have no effect on
+        Changes to your model after calling ``IBACopy`` have no effect on
         the explanations. You need to call :meth:`.update_variables` to update
         the variable values.  Coping the graph might also require more memory than
         adding :class:`.IBALayer` to our model directly. We would recommend to always
@@ -996,17 +996,17 @@ class _InnvestigateAPI:
         return cls.load(cls, state)
 
 
-class IBACopyGraphInnvestigate(IBACopyGraph, _InnvestigateAPI):
+class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
     """
     This analyzer implements the `innvestigate API
     <https://github.com/albermax/innvestigate>`_. It is handy, if your have
     existing code written for the innvestigate package.  The innvestigate API has
     some limitations. It assumes your model is a ``keras.Model`` and it only works
-    with classification.  For more flexibility, see the  :class:`.IBACopyGraph`.
+    with classification.  For more flexibility, see the  :class:`.IBACopy`.
 
 
     .. warning ::
-        Changes to your model after calling ``IBACopyGraphInnvestigate`` have no
+        Changes to your model after calling ``IBACopyInnvestigate`` have no
         effect on the explanations. You need to call :meth:`.update_variables`
         to update the variable values.  Coping the graph might also require more
         memory than adding :class:`.IBALayer` to our model directly. We would
@@ -1040,8 +1040,8 @@ class IBACopyGraphInnvestigate(IBACopyGraph, _InnvestigateAPI):
                              "Please use the model_wo_softmax function!")
         output_names = [model.output.name]
         graph = model.input.graph
-        IBACopyGraph.__init__(self, feature_name, output_names, estimator, feature_mean_std,
-                              graph, session, copy_session_config, **keras_kwargs)
+        IBACopy.__init__(self, feature_name, output_names, estimator, feature_mean_std,
+                         graph, session, copy_session_config, **keras_kwargs)
         _InnvestigateAPI.__init__(self, model, neuron_selection_mode)
         with self.copied_session_and_graph_as_default():
             IBALayer.set_classification_loss(self, self._outputs[0])

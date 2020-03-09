@@ -41,7 +41,7 @@ from keras.layers import Dense, Dropout, Activation, Flatten
 from keras.layers import Conv2D, MaxPooling2D
 from keras.layers import Conv1D, MaxPooling1D
 
-from IBA.tensorflow_v1 import model_wo_softmax, IBACopyGraph, IBACopyGraphInnvestigate
+from IBA.tensorflow_v1 import model_wo_softmax, IBACopy, IBACopyInnvestigate
 from IBA.tensorflow_v1 import IBALayer, to_saliency_map
 
 
@@ -175,7 +175,7 @@ def test_copy_graph_innvestigate(tmpdir):
     K.clear_session()
     model = simple_model(with_iba=False)
     feat_layer = model.get_layer(name='conv3')
-    analyzer = IBACopyGraphInnvestigate(model, feature_name=feat_layer.output.name)
+    analyzer = IBACopyInnvestigate(model, feature_name=feat_layer.output.name)
     analyzer.fit_generator(random_input_generator(), steps_per_epoch=2)
     analyzer.analyze(np.random.normal(size=(1, ) + INPUT_SHAPE))
 
@@ -185,7 +185,7 @@ def test_copy_graph_innvestigate(tmpdir):
     load_graph = tf.Graph()
     sess = tf.Session(graph=load_graph)
     with sess.as_default(), load_graph.as_default():
-        analyzer_loaded = IBACopyGraphInnvestigate.load_npz(fname)
+        analyzer_loaded = IBACopyInnvestigate.load_npz(fname)
 
     x = np.random.normal(size=(1,) + INPUT_SHAPE)
     logit_copied = analyzer.predict({model.input: x})
@@ -206,8 +206,7 @@ def test_copy_graph_raw():
     mean = np.random.uniform(size=shape)
     std = np.random.uniform(size=shape)
 
-    analyzer = IBACopyGraph(feat_layer.output.name, [model.output.name],
-                            feature_mean_std=[mean, std])
+    analyzer = IBACopy(feat_layer.output, [model.output.name], feature_mean_std=[mean, std])
     analyzer.assert_variables_equal()
 
     x = np.random.normal(size=(1, ) + INPUT_SHAPE)
