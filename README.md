@@ -1,6 +1,16 @@
 # IBA: Informational Bottlenecks for Attribution
 
-[[Paper]](https://openreview.net/forum?id=S1xWh1rYwB) | [[API Documentation]](TODO) |  [[Examples]](TODO) | [[Installation]](#installation)
+
+
+[[Paper]](https://openreview.net/forum?id=S1xWh1rYwB)
+| [[Paper Code]](https://github.com/BioroboticsLab/IBA-paper-code)
+| [[API Documentation]](https://iba.readthedocs.io/en/latest/)
+| [[Examples]](notebooks)
+| [[Installation]](#installation)
+
+[![Build Status](https://travis-ci.com/BioroboticsLab/IBA.svg?branch=master)](https://travis-ci.com/BioroboticsLab/IBA)
+[![Documentation Status](https://readthedocs.org/projects/iba/badge/?version=latest)](https://iba.readthedocs.io/en/latest/?badge=latest)
+
 
 <p align="center">
     <img alt="Example GIF" width="300" src="https://github.com/BioroboticsLab/IBA-paper-code/raw/master/monkeys.gif"><br>
@@ -14,7 +24,7 @@ Bottlenecks for Attribution"](https://openreview.net/forum?id=S1xWh1rYwB). We
 provide a [TensorFlow v1](https://www.tensorflow.org/) and
 a [PyTorch](https://pytorch.org/) implementation.
 
-
+For the code to reproduce our paper, see [IBA-paper-code](https://github.com/BioroboticsLab/IBA-paper-code).
 
 
 ## PyTorch
@@ -45,7 +55,9 @@ plot_saliency_map(img.to(dev))
 ## Tensorflow
 
 TODO: include example
+
 TODO: include table with different classes
+
 TODO: comment on copy
 
 ## Documentation
