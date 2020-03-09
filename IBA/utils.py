@@ -118,13 +118,13 @@ class WelfordEstimator:
         self._neuron_nonzero = state['neuron_nonzero']
 
 
-def to_saliency_map(capacity, shape=None, data_format='NCHW'):
+def _to_saliency_map(capacity, shape=None, data_format='channels_last'):
     """
     Converts the layer capacity (in nats) to a saliency map (in bits) of the given shape .
     """
-    if data_format == 'NCHW':
+    if data_format == 'channels_first':
         saliency_map = np.nansum(capacity, 0)
-    elif data_format == 'NHWC':
+    elif data_format == 'channels_last':
         saliency_map = np.nansum(capacity, -1)
     else:
         raise ValueError

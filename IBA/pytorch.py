@@ -31,9 +31,21 @@ from tqdm import tqdm
 from contextlib import contextmanager
 from skimage.transform import resize
 from torchvision.transforms import Normalize, Compose
-
+from IBA.utils import _to_saliency_map
 
 # Helper Functions
+
+
+def to_saliency_map(capacity, shape=None):
+    """
+    Converts the layer capacity (in nats) to a saliency map (in bits) of the given shape .
+
+    Args:
+        capacity (np.ndarray): Capacity in nats.
+        shape (tuple): (height, width) of the image.
+    """
+    return _to_saliency_map(capacity, shape, data_format="channels_first")
+
 
 def insert_into_sequential(sequential, layer, idx):
     """
@@ -403,9 +415,9 @@ class IBA(nn.Module):
         except ImportError:
             try:
                 from tqdm import tqdm
-            except:
+            except ImportError:
                 if progbar:
-                    warnings.warn("Cannot load tqdm! Sorry, not progress bar")
+                    warnings.warn("Cannot load tqdm! Sorry, no progress bar")
                     progbar = False
 
         if progbar:

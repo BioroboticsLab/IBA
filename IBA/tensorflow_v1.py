@@ -62,7 +62,7 @@ import tensorflow_probability as tfp
 
 import numpy as np
 import keras
-from IBA.utils import WelfordEstimator, to_saliency_map
+from IBA.utils import WelfordEstimator, _to_saliency_map
 import keras.backend as K
 from tqdm import trange
 from tqdm.auto import tqdm
@@ -141,6 +141,20 @@ class TFWelfordEstimator(WelfordEstimator):
         """Loads estimator internal state."""
         super().load_state_dict(state)
         self._feature_mean = state['feature_mean']
+
+
+def to_saliency_map(capacity, shape=None, data_format=None):
+    """
+    Converts the layer capacity (in nats) to a saliency map (in bits) of the given shape .
+
+    Args:
+        capacity (np.ndarray): Capacity in nats.
+        shape (tuple): (height, width) of the image.
+        data_format (str): ``"channels_first"`` or ``"channels_last"``. If None,
+            the ``K.image_data_format()`` of keras is used.
+    """
+    data_format = data_format or K.image_data_format()
+    return _to_saliency_map(capacity, shape, data_format)
 
 
 def _kl_div(r, lambda_, mean_r, std_r):
@@ -512,7 +526,7 @@ class IBALayer(keras.layers.Layer):
         """
 
         for step, feed_dict in enumerate(tqdm(
-                generator, disable=progbar, desc="[Fit Estimator]")):
+                generator, disable=not progbar, desc="[Fit Estimator]")):
             self._estimator.fit(feed_dict, session=session, run_kwargs=run_kwargs)
             if self._estimator.n_samples() >= n_samples:
                 break
@@ -805,7 +819,7 @@ class IBACopyGraph(IBALayer):
             warnings.warn("You provided multiple model outputs. We assume the first is the logit. ")
         logits = self._outputs[0]
         with self.copied_session_and_graph_as_default():
-            super().set_classification_loss(logits)
+            return super().set_classification_loss(logits)
 
     def feature_shape(self):
         """ Returns the shape of the feature map."""
@@ -1090,7 +1104,7 @@ class IBACopyGraphInnvestigate(IBACopyGraph, _InnvestigateAPI):
                 copy_feed_dict={self.target: np.array([target])},
             )
             b, h, w, c = X.shape
-            saliency_map = to_saliency_map(capacity, shape=(h, w), data_format='NHWC')
+            saliency_map = to_saliency_map(capacity, shape=(h, w))
             outputs.append(saliency_map)
 
         return np.concatenate(outputs)

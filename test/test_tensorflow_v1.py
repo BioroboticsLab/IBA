@@ -44,7 +44,8 @@ from keras.layers import Conv1D, MaxPooling1D
 
 from keras.applications import MobileNetV2
 
-from IBA.tensorflow_v1 import model_wo_softmax, IBACopyGraph, IBACopyGraphInnvestigate, IBALayer
+from IBA.tensorflow_v1 import model_wo_softmax, IBACopyGraph, IBACopyGraphInnvestigate
+from IBA.tensorflow_v1 import IBALayer, to_saliency_map
 
 
 INPUT_SHAPE = (32, 32, 3)
@@ -122,7 +123,9 @@ def test_iba_layer(tmpdir):
     assert 'loss' in report[0]
 
     iba.collect('loss')
-    iba.analyze({model.input: x, iba.target: np.array([4])})
+    capacity = iba.analyze({model.input: x, iba.target: np.array([4])})
+    saliency_map = to_saliency_map(capacity, shape=(32, 32))
+    assert saliency_map.shape == (32, 32)
     report = iba.get_report()
     assert 'alpha' not in report['init']
 
