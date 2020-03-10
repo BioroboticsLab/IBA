@@ -414,17 +414,17 @@ class IBA(nn.Module):
                 reset (bool): reset the current estimate of the mean and std
 
         """
-        progbar = progbar or self.progbar
-
-        try:
-            tqdm = get_tqdm()
-        except ImportError:
-            if progbar:
-                warnings.warn("Cannot load tqdm! Sorry, no progress bar")
-                progbar = False
-
+        progbar = progbar if progbar is not None else self.progbar
         if progbar:
-            dataloader = tqdm(dataloader, total=n_samples)
+            try:
+                tqdm = get_tqdm()
+                bar = tqdm(dataloader, total=n_samples)
+            except ImportError:
+                warnings.warn("Cannot load tqdm! Sorry, no progress bar")
+                bar = None
+        else:
+            bar = None
+
         if device is None:
             device = next(iter(model.parameters())).device
         if reset:
@@ -435,10 +435,10 @@ class IBA(nn.Module):
                 break
             with torch.no_grad(), self.interrupt_execution(), self.enable_estimation():
                 model(imgs.to(device))
-            if progbar:
-                dataloader.update(len(imgs))
-        if progbar:
-            dataloader.close()
+            if bar:
+                bar.update(len(imgs))
+        if bar:
+            bar.close()
 
         # Cache results
         self._mean = self.estimator.mean()
