@@ -179,24 +179,27 @@ class _InterruptExecution(Exception):
 
 class IBA(nn.Module):
     """
-    The Per Sample Bottleneck provides attribution heatmaps for your model.
+    IBA finds relevant features of your model by applying noise to
+    intermediate features.
 
-    Example:
-        ::
+    Example: ::
 
-            # Create the Per-Sample Bottleneck:
-            btln = PerSampleBottleneck(channels, height, width)
+        model = Net()
+        # Create the Per-Sample Bottleneck:
+        iba = IBA(model.conv4)
 
-            # Add it to your model
-            model.conv4 = nn.Sequential(model.conv4, btln)
+        # Estimate the mean and variance.
+        iba.estimate(model, datagen)
 
-            # Estimate the mean and variance
-            btln.estimate(model, datagen)
+        img, target = next(iter(datagen(batch_size=1)))
 
-            # Create heatmaps
-            model_loss_closure = lambda x: -torch.log_softmax(model(x), 1)[:, target].mean()
-            heatmap = btln.heatmap(img[None].to(dev), model_loss_closure)
-            ```
+        # Closure that returns the loss for one batch
+        model_loss_closure = lambda x: F.nll_loss(F.log_softmax(model(x), target)
+
+        # Explain class target for the given image
+        saliency_map = iba.analyze(img.to(dev), model_loss_closure)
+        plot_saliency_map(img.to(dev))
+
 
     Args:
         layer: The layer after which to inject the bottleneck

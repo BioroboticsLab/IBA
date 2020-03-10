@@ -1,9 +1,9 @@
 # IBA: Informational Bottlenecks for Attribution
 
 
-
-[[Paper]](https://openreview.net/forum?id=S1xWh1rYwB)
+[[Paper Arxiv]](https://arxiv.org/abs/2001.00396)
 | [[Paper Code]](https://github.com/BioroboticsLab/IBA-paper-code)
+| [[Reviews]](https://openreview.net/forum?id=S1xWh1rYwB)
 | [[API Documentation]](https://iba.readthedocs.io/en/latest/)
 | [[Examples]](notebooks)
 | [[Installation]](#installation)
@@ -31,8 +31,7 @@ For the code to reproduce our paper, see [IBA-paper-code](https://github.com/Bio
 
 Examplary usage:
 ```python
-from IBA.pytorch import IBA
-from IBA.utils import plot_saliency_map
+from IBA.pytorch import IBA, plot_saliency_map
 
 model = Net()
 # Create the Per-Sample Bottleneck:
@@ -47,62 +46,99 @@ img, target = next(iter(datagen(batch_size=1)))
 model_loss_closure = lambda x: F.nll_loss(F.log_softmax(model(x), target)
 
 # Explain class target for the given image
-salienct_map = iba.analyze(img.to(dev), model_loss_closure)
+saliency_map = iba.analyze(img.to(dev), model_loss_closure)
 plot_saliency_map(img.to(dev))
 ```
 
 
 ## Tensorflow
 
-TODO: include example
+```python
+from IBA.tensorflow_v1 import IBACopyInnvestigate, plot_saliency_map
 
-TODO: include table with different classes
+# load model
+model_softmax = VGG16(weights='imagenet')
 
-TODO: comment on copy
+# remove the final softmax layer
+model = model_wo_softmax(model_softmax)
+
+# select layer after which the bottleneck will be inserted
+feat_layer = model.get_layer(name='block3_conv2')
+
+# copies the model
+iba = IBACopyInnvestigate(
+    model,
+    neuron_selection_mode='index',
+    feature_name=feat_layer.output.name,
+)
+
+# estimate feature mean and std
+iba.fit_generator(image_generator(), steps_per_epoch=50)
+
+# get the saliency map and plot
+saliency_map = iba.analyze(monkey, neuron_selection=monkey_target)
+plot_saliency_map(saliency_map, img=norm_image(monkey[0]))
+```
+
+**Table:** Overview over the different tensorflow classes.
+**(Task)** type of task (i.e. regression, classification, unsupervised).
+**(Layer)** requires you to add a layer to the explained model.
+**(Copy)** copies the tensorflow graph.
+
+| Class | Task | Layer | Copy | Remarks
+|-------|------|-------|------|--------
+| [`IBALayer`](https://iba.readthedocs.io/en/latest/api/iba_tensorflow_v1.html#IBA.tensorflow_v1.IBALayer) | Any | ✅  | ❌ | Recommended              |
+| [`IBACopy`](https://iba.readthedocs.io/en/latest/api/iba_tensorflow_v1.html#IBA.tensorflow_v1.IBACopy)| Any | ❌ | ✅ | Very flexible
+| [`IBACopy`](https://iba.readthedocs.io/en/latest/api/iba_tensorflow_v1.html#IBA.tensorflow_v1.IBACopyInnvestigate)| Classification | ❌ | ✅ |  Nice API for classification
+
 
 ## Documentation
 
-The API documentation is hosted here.
+[[PyTorch API]](https://iba.readthedocs.io/en/latest/api/iba_pytorch.html)
+| [[TensorFlow API]](https://iba.readthedocs.io/en/latest/api/iba_tensorflow_v1.html)
 
-TODO: mention the different notebooks
+The API documentation is hosted [here](https://iba.readthedocs.io/en/latest).
+
+**Table:** Examplary jupyter notebooks
+
+
+| Notebook | Description |
+|----------|-------------|
+| [pytorch_IBA.ipynb](notebooks/pytorch_IBA.ipynb) | Per-Sample Bottleneck |
+| [pytorch_IBA_train_readout.ipynb](notebooks/pytorch_IBA_train_readout.ipynb) | Train a Readout Bottleneck |
+| [tensorflow_IBALayer_cifar.ipynb](notebooks/tensorflow_IBALayer_cifar.ipynb) | Train a CIFAR model containing an IBALayer |
+| [tensorflow_IBACopy_imagenet.ipynb](notebooks/tensorflow_IBACopy_imagenet.ipynb) | Explains a ImageNet model |
+| [tensorflow_IBACopyInnvestigate_imagenet.ipynb](notebooks/tensorflow_IBACopyInnvestigate_imagenet.ipynb)| [innvestigate](https://github.com/albermax/innvestigate) api wrapper |
+
 
 ## Installation
 
-You can either install it directly from git:
-
-TODO: create pypi package
+You can install it directly from git:
 
 ```bash
-$ pip install git+https://github.com/berleon/IBA
+$ pip install git+https://github.com/BioroboticsLab/IBA
 ```
 
 To install the dependencies for `torch`, `tensorflow`, `tensorflow-gpu` or developement `dev`,
 use the following syntax:
 ```bash
-$ pip install git+https://github.com/berleon/IBA[torch, dev]
+$ pip install git+https://github.com/BioroboticsLab/IBA[torch, dev]
 ```
 
-For development,yYou can also clone the repository locally and then install in development
+For development, you can also clone the repository locally and then install in development
 mode:
 ```bash
-$ git clone https://github.com/attribution-bottleneck/per-sample-bottleneck
+$ git clone https://github.com/BioroboticsLab/IBA
 $ cd per-sample-bottlneck
 $ pip install -e .
 ```
 
-We support tensorflow from `1.12.0` to `1.15.0`.
-Although we currently not plan to support tensorflow 2,
-it might be possible to use our code from tensorflow 2 using the backward capatibility wrapper.
+**Table:** Supported versions
 
-For PyTorch, we support version `1.1.0` to `1.4.0`.
-
-## FAQ
-
-TODO: Comment on the levels of support, we can provide.
-
-TODO: Contributions?
-
-TODO: Wanted Contributions? Other examples than images / imagenet?
+|Package| From | To |
+|-------|------|----|
+| TensorFlow | `1.12.0` | `1.15.0` |
+| PyTorch | `1.1.0` | `1.4.0` |
 
 
 ## Reference

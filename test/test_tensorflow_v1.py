@@ -136,7 +136,8 @@ def test_iba_layer(tmpdir):
         # computes logits using only a subset of all information
         logits_restricted = model.predict(x)
 
-    assert np.abs(logits - logits_restricted).mean() > 1e-4
+    # logits should be considerable different
+    assert np.abs(logits - logits_restricted).mean() > 1e-3
 
 
 def test_iba_layer_1d(tmpdir):
@@ -187,7 +188,15 @@ def test_copy_graph_innvestigate(tmpdir):
     K.clear_session()
     model = simple_model(with_iba=False)
     feat_layer = model.get_layer(name='conv3')
+
+    x = np.random.normal(size=(1,) + INPUT_SHAPE)
+    logits_before = model.predict(x)
+
     analyzer = IBACopyInnvestigate(model, feature_name=feat_layer.output.name)
+
+    logits_after_copy = model.predict(x)
+    assert (logits_before == logits_after_copy).all()
+
     analyzer.fit_generator(random_input_generator(), steps_per_epoch=2)
     analyzer.analyze(np.random.normal(size=(1, ) + INPUT_SHAPE))
 
@@ -200,9 +209,9 @@ def test_copy_graph_innvestigate(tmpdir):
         analyzer_loaded = IBACopyInnvestigate.load_npz(fname)
 
     x = np.random.normal(size=(1,) + INPUT_SHAPE)
-    logit_copied = analyzer.predict({model.input: x})
+    logit_copied = analyzer.predict(x)
     with sess.as_default(), load_graph.as_default():
-        logit_loaded = analyzer_loaded.predict({analyzer_loaded._model.input: x})
+        logit_loaded = analyzer_loaded.predict(x)
     logit_model = model.predict(x)
 
     assert np.abs(logit_model - logit_copied).mean() < 1e-5

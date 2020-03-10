@@ -24,28 +24,46 @@
 
 
 """
-As IBA adds noise to an intermediate layer's output, the
-existing model has to be modified. Either you can add the :class:`.IBALayer` as a layer
-directly in your model or we partially copy your model (using
-``tf.import_graph_def``) with :class:`.IBACopy`. We also provide a wrapper
-of the `innvestigate <https://github.com/albermax/innvestigate>`_ API:
-:class:`.IBACopy`.
+As IBA restricts the flow of information by adding noise to an intermediate feature map,
+we have to modify the existing model.
+
+You can add the :class:`.IBALayer` as a layer directly in your model.
+During training, :class:`.IBALayer` is the identity and only adds noise later to estimate
+the relevance values.
+
+For some models, you might not be able to add a layer, for example, when using
+`pretrained keras models <https://keras.io/applications/>`_.
+In this case, you can use the :class:`.IBACopy` class. It adds the noise
+operation to the graph coping it partially (using ``tf.import_graph_def`` under the hood).
+
+
+If you have existing code for the
+`innvestigate package <https://github.com/albermax/innvestigate>`_,
+the :class:`.IBACopyInnvestigate` class
+implements the innvestigate API.
+
 For examples, see also the `notebook directory
 <https://github.com/BioroboticsLab/IBA/tree/master/notebooks>`_.
 
 
-+-----------------------------------+--------------+-----------------+------------+
-| Class                             | Label Type   | Requires to add | Copies     |
-|                                   |              | a layer?        | tf graph?  |
-+===================================+==============+=================+============+
-| :class:`.IBALayer`                |   Any        |     ✅          |      ❌    |
-+-----------------------------------+--------------+-----------------+------------+
-| :class:`.IBACopy`                 |   Any        |     ❌          |      ✅    |
-+-----------------------------------+--------------+-----------------+------------+
-| :class:`.IBACopyInnvestigate`     |Classification|     ❌          |      ✅    |
-+-----------------------------------+--------------+-----------------+------------+
+**Table:** Overview over the classes.
+**(Task)** type of task (i.e. regression, classification, unsupervised).
+**(Layer)** requires you to add a layer to the explained model.
+**(Copy)** copies the tensorflow graph.
 
-
++-------------------------------+--------------+---------+---------+--------------------------+
+| Class                         | Task         | Layer   | Copy    |   Note                   |
+|                               |              |         |         |                          |
++===============================+==============+=========+=========+==========================+
+| :class:`.IBALayer`            |   Any        |     ✅  |      ❌ | Recommended              |
+|                               |              |         |         |                          |
++-------------------------------+--------------+---------+---------+--------------------------+
+| :class:`.IBACopy`             |   Any        |     ❌  |      ✅ | Very flexible            |
+|                               |              |         |         |                          |
++-------------------------------+--------------+---------+---------+--------------------------+
+| :class:`.IBACopyInnvestigate` |Classification|     ❌  |      ✅ | Nice API for             |
+|                               |              |         |         | classification           |
++-------------------------------+--------------+---------+---------+--------------------------+
 """
 
 from collections import OrderedDict
@@ -90,6 +108,11 @@ class TFWelfordEstimator(WelfordEstimator):
         """
         Estimates the mean and std given the inputs in ``feed_dict``.
 
+        .. warning ::
+
+            Ensure that your model is in eval mode. If you use keras, call
+            ``K.set_learning_phase(0)``.
+
         Args:
             feed_dict (dict): tensorflow feed dict with model inputs.
             session (tf.Session): session to execute the model. If ``None``,
@@ -104,6 +127,11 @@ class TFWelfordEstimator(WelfordEstimator):
     def fit_generator(self, generator, session=None, progbar=True, run_kwargs={}):
         """
         Estimates the mean and std from the ``feed_dict`` generator.
+
+        .. warning ::
+
+            Ensure that your model is in eval mode. If you use keras, call
+            ``K.set_learning_phase(0)``.
 
         Args:
             generator: yield tensorflow ``feed_dict``s.
@@ -231,37 +259,45 @@ class IBALayer(keras.layers.Layer):
     """
     A keras layer that can be included in your model.
     This class should work with any model and does not copy the tensorflow graph.
-    If you cannot alter you model definition, you have to copy the graph (use
-    :class:`.IBACopy`, the :class:`.IBACopyInnvestigate`).
+    Although it is a keras layer, it should be possible to use it from other libaries.
+    If you cannot alter your model definition, you have to copy the graph (use
+    :class:`.IBACopy` or :class:`.IBACopyInnvestigate`).
 
     Example:  ::
 
         model = keras.Sequential()
 
         # add some layer
-        model.add(Conv2D())
+        model.add(Conv2D(64, 3, 3))
+        model.add(BatchNorm())
+        model.add(Activation('relu'))
+        # ... more layers
 
         # add iba in between
         iba = IBALayer()
         model.add(iba)
 
-        # add some more layers
+        # ... more layers
+        model.add(Conv2D(64, 3, 3))
+        model.add(Flatten())
         model.add(Dense(10))
 
         # set classification cross-entropy loss
-        iba.set_classification_loss(model.output)
+        target = iba.set_classification_loss(model.output)
 
         # estimate the feature mean and std.
         for imgs, _ in data_generator():
             iba.fit({model.input: imgs})
 
         # explain target for image
-        saliency_map = iba.analyze({model.input: image, iba.target: target})
+        ex_image, ex_target = get_explained_image()
+        saliency_map = iba.analyze({model.input: ex_image, target: ex_target})
 
 
     Args:
         estimator (TFWelfordEstimator): already fitted estimator.
         feature_mean_std (tuple): tuple of estimated feature ``(mean, std)``.
+            Do not provide ``feature_mean_std`` and ``estimator``.
         **kwargs: keras layer kwargs, see ``keras.layers.Layer``
     """
     def __init__(self, estimator=None, feature_mean_std=None, **kwargs):
@@ -283,6 +319,10 @@ class IBALayer(keras.layers.Layer):
         self._report_tensors_first = OrderedDict()
 
         super().__init__(**kwargs)
+
+    def _get_session(self, session=None):
+        """ Returns session if not None or the keras or tensoflow default session.  """
+        return session or keras.backend.get_session() or tf.get_default_session()
 
     # Reporting
 
@@ -334,7 +374,10 @@ class IBALayer(keras.layers.Layer):
         """Returns the report for the last run."""
         return self._log
 
+    # Building the layer
+
     def build(self, input_shape):
+        """ Builds the keras layer given the input shape.  """
         shape = self._feature_shape = [1, ] + [int(d) for d in input_shape[1:]]
 
         k = np.prod([int(s) for s in shape]).astype(np.float32)
@@ -377,9 +420,12 @@ class IBALayer(keras.layers.Layer):
         super().build(input_shape)
 
     def compute_output_shape(self, input_shape):
+        """ Returns the ``input_shape``. """
         return input_shape
 
-    def call(self, inputs):
+    def call(self, inputs) -> tf.Tensor:
+        """ Returns the output tensor. You can enable the restriction of
+        the information flow with: :meth:`.restrict_flow`. """
         if self._estimator is None and not self._feature_mean_std_given:
             self._estimator = TFWelfordEstimator(inputs.name)
 
@@ -442,8 +488,9 @@ class IBALayer(keras.layers.Layer):
     @contextmanager
     def restrict_flow(self, session=None):
         """
-        Context manager to restrict the flow of the layer.
-        Useful to estimate model output when noise is added.
+        Context manager to restrict the flow of the layer.  Useful to estimate
+        model output when noise is added.  If the flow restirction is enabled,
+        you can only call the model with a single sample (batch size = 1).
 
         Example: ::
 
@@ -460,20 +507,12 @@ class IBALayer(keras.layers.Layer):
         yield
         session.run(tf.assign(self._restrict_flow, old_value))
 
-    def _get_session(self, session=None):
-        """ Returns session if not None or the keras or tensoflow default session.  """
-        return session or keras.backend.get_session() or tf.get_default_session()
-
     # Set model loss
 
-    def get_copied_outputs(self):
-        """Returns the copied model outputs provided in the
-        :class:`the constructor <.IBACopy>`."""
-        return self._outputs
-
-    def set_classification_loss(self, logits, optimizer_cls=tf.train.AdamOptimizer):
+    def set_classification_loss(self, logits, optimizer_cls=tf.train.AdamOptimizer) -> tf.Tensor:
         """
         Creates a cross-entropy loss from the logit tensors.
+        Returns the target tensor.
 
         Example: ::
 
@@ -519,9 +558,15 @@ class IBALayer(keras.layers.Layer):
         self._model_loss_set = True
 
     # Fit std and mean estimator
+
     def fit(self, feed_dict, session=None, run_kwargs={}):
         """
         Estimate the feature mean and std from the given feed_dict.
+
+        .. warning ::
+
+            Ensure that your model is in eval mode. If you use keras, call
+            ``K.set_learning_phase(0)``.
 
         Args:
             generator: Yields feed_dict with all inputs
@@ -546,11 +591,17 @@ class IBALayer(keras.layers.Layer):
         """
         Estimates the feature mean and std from the generator.
 
+
+        .. warning ::
+
+            Ensure that your model is in eval mode. If you use keras, call
+            ``K.set_learning_phase(0)``.
+
         Args:
-            generator: Yields ``feed_dict``s with inputs to all placeholders.
-            n_samples: Stop after ``n_samples``.
-            session: use this session. If ``None`` use default session.
-            run_kwargs: additional kwargs to ``session.run``.
+            generator: Yields ``feed_dict`` s with inputs to all placeholders.
+            n_samples (int): Stop after ``n_samples``.
+            session (tf.Session): tf session to use. If ``None`` use default session.
+            run_kwargs (dict): additional kwargs to ``session.run``.
         """
 
         try:
@@ -576,10 +627,10 @@ class IBALayer(keras.layers.Layer):
                 normalize_beta=True,
                 session=None,
                 pass_mask=None,
-                progbar=False):
+                progbar=False) -> np.ndarray:
         """
-        Returns the saliency map. This method executes an optimization to remove
-        information while retaining a low model loss.
+        Returns the transmitted information per feature. See :func:`to_saliency_map` to convert the
+        intermediate capacites to a visual saliency map.
 
         Args:
             feed_dict (dict): TensorFlow feed_dict providing your model inputs.
@@ -588,16 +639,15 @@ class IBALayer(keras.layers.Layer):
             beta (int): trade-off parameter between model loss and information loss.
             learning_rate (float): Learning rate of the Adam optimizer.
             min_std (float): Minimum feature standard derivation.
-            smooth_std (float): Smoothing of the lambda
-            normalize_beta (bool): Devide beta by the nubmer of neurons
-            session (tf.Session): TensorFlow session to  run the optimization
+            smooth_std (float): Smoothing of the lambda. Set to ``0`` to disable.
+            normalize_beta (bool): Devide beta by the nubmer of feature neurons
+                (default: ``True``).
+            session (tf.Session): TensorFlow session to run the optimization.
             pass_mask (np.array): same shape as the feature map.
                 ``pass_mask`` masks neurons which are always passed to the next layer.
                 No noise is added if ``pass_mask == 0``.  For example, it might
                 be usefull if a variable lenght sequence is zero-padded.
-
             progbar (bool): Flag to display progressbar.
-
         """
         session = self._get_session(session)
         feature = session.run(self.input, feed_dict=feed_dict)
@@ -835,6 +885,11 @@ class IBACopy(IBALayer):
 
             self.update_variables()
 
+    def get_copied_outputs(self):
+        """Returns the copied model symbolic outputs provided in the
+        :class:`the constructor <.IBACopy>`."""
+        return self._outputs
+
     def assert_variables_equal(self):
         """
         Asserts that all variables in the original graph and the copied graph have the same value.
@@ -849,7 +904,8 @@ class IBACopy(IBALayer):
     def update_variables(self):
         """
         Copies the variable values from the original graph to the new copied graph.
-        If you modified your model, call this function.
+        Call this function after you modified your model and want the changes to
+        affect the saliency map.
         """
         var_values = self._original_session.run(self._original_vars)
         assigns = [tf.assign(imported_var, val)
@@ -1051,7 +1107,7 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
     <https://github.com/albermax/innvestigate>`_. It is handy, if your have
     existing code written for the innvestigate package.  The innvestigate API has
     some limitations. It assumes your model is a ``keras.Model`` and it only works
-    with classification.  For more flexibility, see the  :class:`.IBACopy`.
+    with classification tasks.  For more flexibility, see the  :class:`.IBACopy`.
 
 
     .. warning ::
@@ -1071,7 +1127,7 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
         feature_mean_std (tuple): tuple of estimated feature ``(mean, std)``.
         session: TensorFlow session corresponding to the ``model``. If
             ``None``, the default session is used.
-        copy_session_config: Session config for the newly created session.
+        copy_session_config (dict): Session config for the newly created session.
         disable_model_checks: Not used by IBA.
         **keras_kwargs: layer kwargs, see ``keras.layers.Layer``.
 
@@ -1096,11 +1152,35 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
             IBALayer.set_classification_loss(self, self._outputs[0])
 
     def fit(self, X, session=None, run_kwargs={}):
+        """Estimates the feature mean and std from the samples ``X``.
+        Generally, we recommend run the estimation on about 5000 samples.
 
+        .. warning ::
+
+            Ensure that your model is in eval mode. If you use keras, call
+            ``K.set_learning_phase(0)``.
+
+        """
         session = session or self._original_session
         super().fit({self._model.input: X}, session, run_kwargs)
 
     def fit_generator(self, generator, steps_per_epoch=None, epochs=1, verbose=1, session=None):
+        """
+        Estimates the feature mean and std from the generator.
+        Generally, we recommend run the estimation on about 5000 samples.
+
+        .. warning ::
+
+            Ensure that your model is in eval mode. If you use keras, call
+            ``K.set_learning_phase(0)``.
+
+        Args:
+            generator: Yields tuples of ``(samples, targets)``.
+            steps_per_epoch (int): number of steps to run per epoch.
+            epochs (int): number epoch to run.
+            verbose (int): If ``1``, prints a progressbar.
+            session (:obj:`tf.Session`, optional): tf session to evaluate the model.
+        """
         session = self._get_session(session)
         for epoch in range(epochs):
             if steps_per_epoch is not None:
@@ -1148,7 +1228,7 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
             if neuron_selection.size == 1:
                 neuron_selection = np.repeat(neuron_selection, len(X[0]))
         elif self._neuron_selection_mode == 'max_activation':
-            logits = self.predict({self._model.input: X})
+            logits = self.predict(X)
             neuron_selection = np.argmax(logits, axis=1)
 
         outputs = []
@@ -1163,8 +1243,12 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
 
         return np.concatenate(outputs)
 
-    def predict(self, feature_feed_dict):
-        return super().predict(feature_feed_dict)[0]
+    def predict(self, X):
+        """
+        Returns the model output given the input ``X``. Useful to check if
+        the graph was copied correctly.
+        """
+        return super().predict({self._model.input: X})[0]
 
     def _get_state(self):
         state = super()._get_state()
