@@ -91,7 +91,7 @@ class WelfordEstimator:
         return self.m
 
     def std(self):
-        """returns the estimate of the standard derivation."""
+        """ Returns the estimate of the standard derivation."""
         return np.sqrt(self.s / (self._n_samples - 1))
 
     def active_neurons(self, threshold=0.01):
@@ -120,7 +120,9 @@ class WelfordEstimator:
 
 def _to_saliency_map(capacity, shape=None, data_format='channels_last'):
     """
-    Converts the layer capacity (in nats) to a saliency map (in bits) of the given shape .
+    Converts the layer capacity (in nats) to a saliency map (in bits) of the given shape.
+    PyTorch:    Use data_format == 'channels_first'
+    Tensorflow: Use data_format == 'channels_last'
     """
     if data_format == 'channels_first':
         saliency_map = np.nansum(capacity, 0)

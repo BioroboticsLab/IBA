@@ -221,6 +221,8 @@ class IBA(nn.Module):
                  batch_size=10,
                  initial_alpha=5.0,
                  active_neurons_threshold=0.01,
+                 feature_mean=None,
+                 feature_std=None,
                  estimator=None,
                  progbar=False,
                  relu=False):
@@ -235,16 +237,16 @@ class IBA(nn.Module):
         self.alpha = None  # Initialized on first forward pass
         self.progbar = progbar
         self.sigmoid = nn.Sigmoid()
-        self.buffer_capacity = None  # Filled on forward pass, used for loss
+        self._buffer_capacity = None  # Filled on forward pass, used for loss
         self.sigma = sigma
         self.estimator = estimator or TorchWelfordEstimator()
         self.device = None
         self._estimate = False
-        self._mean = None
-        self._std = None
+        self._mean = feature_mean
+        self._std = feature_std
         self._active_neurons = None
         self._active_neurons_threshold = active_neurons_threshold
-        self._supress_information = False
+        self._restrict_flow = False
         self._interrupt_execution = False
         self._hook_handle = None
 
@@ -301,7 +303,7 @@ class IBA(nn.Module):
             raise ValueError("Cannot detach hock. Either you never attached or already detached.")
 
     def forward(self, x):
-        if self._supress_information:
+        if self._restrict_flow:
             return self._do_restrict_information(x, self.alpha)
         if self._estimate:
             self.estimator(x)
@@ -366,7 +368,7 @@ class IBA(nn.Module):
         # Sample new output values from p(z|x)
         eps = mu.data.new(mu.size()).normal_()
         z_norm = x_norm * lamb + (1-lamb) * eps
-        self.buffer_capacity = self._calc_capacity(mu, log_var) * self._active_neurons
+        self._buffer_capacity = self._calc_capacity(mu, log_var) * self._active_neurons
 
         # Denormalize z to match original magnitude of x
         z = z_norm * self._std + self._mean
@@ -448,7 +450,7 @@ class IBA(nn.Module):
             self._build()
 
     @contextmanager
-    def supress_information(self):
+    def restrict_flow(self):
         """
         Context mananger to enable information supression.
 
@@ -459,13 +461,13 @@ class IBA(nn.Module):
                     # now noise is added
                     model(x)
         """
-        self._supress_information = True
+        self._restrict_flow = True
         try:
             yield
         finally:
-            self._supress_information = False
+            self._restrict_flow = False
 
-    def analyze(self, input_t, model_loss_fn,
+    def analyze(self, input_t, model_loss_fn, mode="saliency",
                 beta=None, optimization_steps=None, min_std=None,
                 lr=None, batch_size=None, active_neurons_threshold=0.01):
         """
@@ -475,6 +477,7 @@ class IBA(nn.Module):
         Args:
             input_t: input image of shape (1, C, H W)
             model_loss_fn: closure evaluating the model
+            mode: how to post-process the resulting map: 'saliency' (default) or 'capacity'
             beta: if not None, overrides the bottleneck beta value
             optimization_steps: if not None, overrides the bottleneck optimization_steps value
             min_std: if not None, overrides the bottleneck min_std value
@@ -516,11 +519,11 @@ class IBA(nn.Module):
             tqdm = get_tqdm()
             opt_range = tqdm(opt_range, desc="Training Bottleneck", disable=not self.progbar)
         except ImportError:
-            if progbar:
+            if self.progbar:
                 warnings.warn("Cannot load tqdm! Sorry, no progress bar")
                 self.progbar = False
 
-        with self.supress_information():
+        with self.restrict_flow():
             for _ in opt_range:
                 optimizer.zero_grad()
                 model_loss = model_loss_fn(batch)
@@ -534,7 +537,15 @@ class IBA(nn.Module):
                 self._model_loss.append(model_loss.item())
                 self._information_loss.append(information_loss.item())
 
-        return self._current_heatmap(input_t.shape[2:])
+        capacity_np = self.capacity().detach().cpu().numpy()
+        if mode == "saliency":
+            # In bits, summed over channels, scaled to input
+            return to_saliency_map(capacity_np, input_t.shape[2:])
+        elif mode == "capacity":
+            # In bits, not summed, not scaled
+            return capacity_np / float(np.log(2))
+        else:
+            raise ValueError
 
     def capacity(self):
         """
@@ -542,7 +553,7 @@ class IBA(nn.Module):
         over the redundant batch dimension.
         Shape is ``(self.channels, self.height, self.width)``
         """
-        return self.buffer_capacity.mean(dim=0)
+        return self._buffer_capacity.mean(dim=0)
 
     def _current_heatmap(self, shape=None):
         """ Return a 2D-heatmap of flowing information.
