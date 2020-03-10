@@ -352,9 +352,6 @@ class IBALayer(keras.layers.Layer):
         # feature map
         self._feature = tf.get_variable('feature', shape, trainable=False)
 
-        # std normal noise
-        self._std_normal = tf.random.normal([self._batch_size, ] + shape[1:])
-
         # mean of feature map r
         self._mean_r = tf.get_variable(
             name='mean_r', trainable=False,  dtype=tf.float32, initializer=tf.zeros(shape))
@@ -391,7 +388,10 @@ class IBALayer(keras.layers.Layer):
 
         feature = tf.cond(self._use_layer_input, lambda: inputs, lambda: self._feature)
 
-        tile_shape = [self._batch_size, ] + [1] * (len(self._feature_shape) - 1)
+        tile_batch_size = tf.cond(self._use_layer_input,
+                                  lambda: 1,
+                                  lambda: self._batch_size)
+        tile_shape = [tile_batch_size, ] + [1] * (len(self._feature_shape) - 1)
         R = tf.tile(feature, tile_shape)
         pass_mask = tf.tile(self._pass_mask, tile_shape)
         restrict_mask = 1 - pass_mask
@@ -405,8 +405,11 @@ class IBALayer(keras.layers.Layer):
         lambda_pre_blur = tf.sigmoid(self._alpha)
         λ = _gaussian_blur(lambda_pre_blur, std=self._smooth_std)
 
+        # std normal noise N(0, 1)
+        std_normal = tf.random.normal(tile_shape)
+
         # ε ~ N(μ_r, σ_r)
-        ε = std_r_min * self._std_normal + self._mean_r
+        ε = std_r_min * std_normal + self._mean_r
 
         Z = λ * R + (1 - λ) * ε
 
@@ -435,6 +438,27 @@ class IBALayer(keras.layers.Layer):
         self._report_first('pass_mask', pass_mask)
 
         return output
+
+    @contextmanager
+    def restrict_flow(self, session=None):
+        """
+        Context manager to restrict the flow of the layer.
+        Useful to estimate model output when noise is added.
+
+        Example: ::
+
+            capacity = iba.analyze({model.input: x})
+            # computes logits using all information
+            logits = model.predict(x)
+            with iba.restrict_flow():
+                # computes logits using only a subset of all information
+                logits_restricted = model.predict(x)
+        """
+        session = self._get_session(session)
+        old_value = session.run(self._restrict_flow)
+        session.run(tf.assign(self._restrict_flow, True))
+        yield
+        session.run(tf.assign(self._restrict_flow, old_value))
 
     def _get_session(self, session=None):
         """ Returns session if not None or the keras or tensoflow default session.  """
@@ -689,6 +713,11 @@ class IBALayer(keras.layers.Layer):
         vals = session.run(final_report_tensors, feed_dict=feed_dict)
         self._log['final'] = OrderedDict(zip(final_report_tensor_names, vals))
 
+        # reset flags up
+        session.run([
+            tf.assign(self._restrict_flow, False, name='assign_restrict_flow'),
+            tf.assign(self._use_layer_input, True, name='assign_use_layer_input'),
+        ])
         return self._log['final']['capacity'][0]
 
     def state_dict(self):

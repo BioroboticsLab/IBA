@@ -126,6 +126,18 @@ def test_iba_layer(tmpdir):
     report = iba.get_report()
     assert 'alpha' not in report['init']
 
+    # for the test, remove all information
+    capacity = iba.analyze({model.input: x, iba.target: np.array([4])}, beta=100000)
+
+    print("STATE", iba._get_session().run([iba._restrict_flow, iba._use_layer_input]))
+    logits = model.predict(x)
+    with iba.restrict_flow():
+        print("STATE 2", iba._get_session().run([iba._restrict_flow, iba._use_layer_input]))
+        # computes logits using only a subset of all information
+        logits_restricted = model.predict(x)
+
+    assert np.abs(logits - logits_restricted).mean() > 1e-4
+
 
 def test_iba_layer_1d(tmpdir):
     K.clear_session()
