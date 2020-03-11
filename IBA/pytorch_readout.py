@@ -75,7 +75,7 @@ class IBAReadout(IBA):
             warnings.warn(f"Additional arguments ({list(kwargs.keys())}) "
                           " are ignored in the Readout IBA.")
         # Pass the input through the model
-        with self.supress_information(), torch.no_grad():
+        with self.restrict_flow(), torch.no_grad():
             model(input_t)
         # Read heatmap
         return self._current_heatmap(input_t.shape[2:])
@@ -109,7 +109,7 @@ class IBAReadout(IBA):
         again as model input for the nested pass to obtain the feature maps.
         """
         def input_hook(module, inputs):
-            if self._supress_information and not self._nested_pass:
+            if self._restrict_flow and not self._nested_pass:
                 self._last_input = inputs[0].clone()
         self._input_hook = model.register_forward_pre_hook(input_hook)
 
@@ -119,7 +119,7 @@ class IBAReadout(IBA):
         self._readout_estimators = ModuleList([self._estimator_type() for _ in self.layers])
 
     def forward(self, x):
-        if self._supress_information:
+        if self._restrict_flow:
             if not self._nested_pass:
                 # Obtain alpha using the readout and readout network
                 alpha = self._generate_alpha()
