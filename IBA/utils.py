@@ -43,9 +43,12 @@ class WelfordEstimator:
         Given a batch of images ``imgs`` with shape ``(10, 3, 64, 64)``, the mean and std could
         be estimated as follows::
 
-            imgs = torch.randn(10, 3, 64, 64)
-            estim = WelfordEstimator()
-            estim(imgs)
+            # exemplary data source: 5 batches of size 10, filled with random data
+            batch_generator = (torch.randn(10, 3, 64, 64) for _ in range(5))
+
+            estim = WelfordEstimator(3, 64, 64)
+            for batch in batch_generator:
+                estim(batch)
 
             # returns the estimated mean
             estim.mean()

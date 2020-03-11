@@ -24,7 +24,7 @@ Modules
 -------
 
 * :doc:`api/iba_pytorch`:  :class:`IBA <IBA.pytorch.IBA>`
-  * :doc:`api/iba_tensorflow_v1`: :class:`IBALayer <IBA.tensorflow_v1.IBALayer>`, :class:`IBACopy <IBA.tensorflow_v1.IBACopy>`, :class:`IBACopyInnvestigate <IBA.tensorflow_v1.IBACopyInnvestigate>`,
+* :doc:`api/iba_tensorflow_v1`: :class:`IBALayer <IBA.tensorflow_v1.IBALayer>`, :class:`IBACopy <IBA.tensorflow_v1.IBACopy>`, :class:`IBACopyInnvestigate <IBA.tensorflow_v1.IBACopyInnvestigate>`,
 * :doc:`api/utils`: :func:`plot_saliency_map() <IBA.utils.plot_saliency_map>`
 
 
