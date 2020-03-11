@@ -33,11 +33,13 @@ Examplary usage:
 ```python
 from IBA.pytorch import IBA, plot_saliency_map
 
+# Initialize some pre-trained model to analyze
 model = Net()
-# Create the Per-Sample Bottleneck:
+
+# Create the Per-Sample Bottleneck at a certain layer:
 iba = IBA(model.conv4)
 
-# Estimate the mean and variance.
+# Estimate the mean and variance of features at this layer.
 iba.estimate(model, datagen)
 
 img, target = next(iter(datagen(batch_size=1)))
@@ -47,9 +49,9 @@ model_loss_closure = lambda x: F.nll_loss(F.log_softmax(model(x), target)
 
 # Explain class target for the given image
 saliency_map = iba.analyze(img.to(dev), model_loss_closure)
-plot_saliency_map(img.to(dev))
+plot_saliency_map(saliency_map)
 ```
-
+gene
 
 ## Tensorflow
 

@@ -66,7 +66,7 @@ def tensor_to_np_img(img_t):
     ])(img_t).detach().cpu().numpy().transpose(1, 2, 0)
 
 
-class SpatialGaussianKernel(nn.Module):
+class _SpatialGaussianKernel(nn.Module):
     """ A simple convolutional layer with fixed gaussian kernels, used to smoothen the input """
     def __init__(self, kernel_size, sigma, channels,):
         super().__init__()
@@ -110,9 +110,12 @@ class TorchWelfordEstimator(nn.Module):
         Given a batch of images ``imgs`` with shape ``(10, 3, 64, 64)``, the mean and std could
         be estimated as follows::
 
-            imgs = torch.randn(10, 3, 64, 64)
+            # exemplary data source: 5 batches of size 10, filled with random data
+            batch_generator = (torch.randn(10, 3, 64, 64) for _ in range(5))
+
             estim = WelfordEstimator(3, 64, 64)
-            estim(imgs)
+            for batch in batch_generator:
+                estim(batch)
 
             # returns the estimated mean
             estim.mean()
@@ -205,11 +208,13 @@ class IBA(nn.Module):
         layer: The layer after which to inject the bottleneck
         sigma: The standard deviation of the gaussian kernel to smooth
             the mask, or None for no smoothing
-        beta: weighting of model loss and mean information loss.
-        min_std: minimum std of the features
-        lr: optimizer learning rate. default: 1
-        batch_size: number of samples to use per iteration
-        initial_alpha: initial value for the parameter.
+        beta: Weighting of model loss and mean information loss.
+        min_std: Minimum std of the features
+        lr: Optimizer learning rate. default: 1. As we are optimizing
+            over very few iterations, a relatively high learning rate
+            can be used compared to the training of the model itself.
+        batch_size: Number of samples to use per iteration
+        initial_alpha: Initial value for the parameter.
     """
     def __init__(self,
                  layer=None,
@@ -290,7 +295,7 @@ class IBA(nn.Module):
         if self.sigma is not None and self.sigma > 0:
             # Construct static conv layer with gaussian kernel
             kernel_size = int(round(2 * self.sigma)) * 2 + 1  # Cover 2.5 stds in both directions
-            self.smooth = SpatialGaussianKernel(kernel_size, self.sigma, shape[0]).to(device)
+            self.smooth = _SpatialGaussianKernel(kernel_size, self.sigma, shape[0]).to(device)
         else:
             self.smooth = None
 
@@ -303,6 +308,13 @@ class IBA(nn.Module):
             raise ValueError("Cannot detach hock. Either you never attached or already detached.")
 
     def forward(self, x):
+        """
+        You don't need to call this method manually.
+
+        The IBA acts as a model layer, passing the information in `x` along to the next layer
+        either as-is or by restricting the flow of infomration.
+        We use it also to estimate the distribution of `x` passing through the layer.
+        """
         if self._restrict_flow:
             return self._do_restrict_information(x, self.alpha)
         if self._estimate:
@@ -457,7 +469,7 @@ class IBA(nn.Module):
         Example:
             To make a prediction, with the information flow being supressed.::
 
-                with btln.supress_information():
+                with iba.restrict_flow():
                     # now noise is added
                     model(x)
         """
@@ -537,32 +549,23 @@ class IBA(nn.Module):
                 self._model_loss.append(model_loss.item())
                 self._information_loss.append(information_loss.item())
 
-        capacity_np = self.capacity().detach().cpu().numpy()
-        if mode == "saliency":
-            # In bits, summed over channels, scaled to input
-            return to_saliency_map(capacity_np, input_t.shape[2:])
-        elif mode == "capacity":
-            # In bits, not summed, not scaled
-            return capacity_np / float(np.log(2))
-        else:
-            raise ValueError
+        return self._get_saliency(mode=mode, shape=input_t.shape[2:])
 
     def capacity(self):
         """
-        Returns a tensor with the currenct capacity from the last input, averaged
+        Returns a tensor with the capacity from the last input, averaged
         over the redundant batch dimension.
         Shape is ``(self.channels, self.height, self.width)``
         """
         return self._buffer_capacity.mean(dim=0)
 
-    def _current_heatmap(self, shape=None):
-        """ Return a 2D-heatmap of flowing information.
-        Optionally resize the map to match a certain shape. """
-        heatmap = self.capacity().detach().cpu().numpy()
-        heatmap = np.nansum(heatmap, 0) / float(np.log(2))
-        if shape is not None:
-            ho, wo = heatmap.shape
-            h, w = shape
-            # Scale bits to the pixels
-            heatmap *= (ho*wo) / (h*w)
-            return resize(heatmap, shape, order=1, preserve_range=True)
+    def _get_saliency(self, mode='saliency', shape=None):
+        capacity_np = self.capacity().detach().cpu().numpy()
+        if mode == "saliency":
+            # In bits, summed over channels, scaled to input
+            return to_saliency_map(capacity_np, shape)
+        elif mode == "capacity":
+            # In bits, not summed, not scaled
+            return capacity_np / float(np.log(2))
+        else:
+            raise ValueError

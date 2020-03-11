@@ -70,15 +70,16 @@ class IBAReadout(IBA):
             [h.detach() for h in self._readout_hooks]
             self._readout_hooks = [None for _ in self._readout_hooks]
 
-    def analyze(self, input_t, model, **kwargs):
+    def analyze(self, input_t, model, mode='saliency', **kwargs):
         if len(kwargs) > 0:
             warnings.warn(f"Additional arguments ({list(kwargs.keys())}) "
                           " are ignored in the Readout IBA.")
         # Pass the input through the model
         with self.restrict_flow(), torch.no_grad():
             model(input_t)
+
         # Read heatmap
-        return self._current_heatmap(input_t.shape[2:])
+        return self._get_saliency(mode=mode, shape=input_t.shape[2:])
 
     def _attach_readout_hooks(self):
         """
