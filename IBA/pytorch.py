@@ -308,6 +308,13 @@ class IBA(nn.Module):
             raise ValueError("Cannot detach hock. Either you never attached or already detached.")
 
     def forward(self, x):
+        """
+        You don't need to call this method manually.
+
+        The IBA acts as a model layer, passing the information in `x` along to the next layer
+        either as-is or by restricting the flow of infomration.
+        We use it also to estimate the distribution of `x` passing through the layer.
+        """
         if self._restrict_flow:
             return self._do_restrict_information(x, self.alpha)
         if self._estimate:
@@ -546,7 +553,7 @@ class IBA(nn.Module):
 
     def capacity(self):
         """
-        Returns a tensor with the currenct capacity from the last input, averaged
+        Returns a tensor with the capacity from the last input, averaged
         over the redundant batch dimension.
         Shape is ``(self.channels, self.height, self.width)``
         """
