@@ -69,7 +69,7 @@ def test_pytorch():
     iba.estimate(net, generator(), progbar=True)
 
     out = net(x)
-    with iba.supress_information():
+    with iba.restrict_flow():
         out_with_noise = net(x)
 
     assert (out != out_with_noise).any()
@@ -84,7 +84,7 @@ def test_pytorch():
         with pytest.raises(ValueError):
             iba.detach()
 
-        with iba.supress_information():
+        with iba.restrict_flow():
             out_with_noise = net(x)
         assert (out != out_with_noise).any()
 
@@ -92,7 +92,7 @@ def test_pytorch():
         iba.detach()
 
         # no influence after detach
-        with iba.supress_information():
+        with iba.restrict_flow():
             out_with_noise = net(x)
 
         assert (out == out_with_noise).all()
