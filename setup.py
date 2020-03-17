@@ -1,14 +1,18 @@
 import setuptools
 
+
 setuptools.setup(
     name="iba",
-    version="0.1.0",
+    url="https://github.com/BioroboticsLab/IBA",
+    version="0.0.1",
     author="Karl Schulz, Leon Sixt",
-    author_email="",
+    author_email="karl.schulz@tum.de, leon.sixt@fu-berlin.de",
     license='MIT',
     description="Information Bottlenecks for Attribution (IBA)",
-    packages=setuptools.find_namespace_packages(include=['IBA.*']),
-    install_requires=['numpy', 'scikit-image', 'tqdm', 'pytest'],
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    packages=setuptools.find_packages(),
+    install_requires=['numpy', 'scikit-image', 'tqdm', 'Pillow<7.0.0'],
     extras_require={
         'dev': [
             'pytest',
@@ -19,11 +23,12 @@ setuptools.setup(
             'sphinx-autobuild',
         ],
         'torch': [
-            'torch',
-            'torchvision',
+            'torch>=1.1.0',
+            'torchvision>=0.3.0',
         ],
-        'tensorflow': [
+        'tensorflow-v1': [
             'tensorflow>=1.12.0, <2.0',
+            'tensorflow-probability<=0.7.0',
             'keras<2.3.0',
         ],
         'tensorflow-gpu': [
