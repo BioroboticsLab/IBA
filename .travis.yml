@@ -47,8 +47,11 @@ install:
   - conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION
   - source activate test-environment
   - echo pip install $TF $TFP $KERAS $TORCH $TV
-  - pip install -f https://download.pytorch.org/whl/torch_stable.html
-        $TF $TFP $KERAS $TORCH $TV
+  # if not empty configuration
+  - if [ "$TORCH" != "" ]; then
+        pip install -f https://download.pytorch.org/whl/torch_stable.html
+                $TF $TFP $KERAS $TORCH $TV;
+    fi
   - pip install ".[dev, torch, tensorflow-v1]"
   - KERAS_BACKEND=tensorflow
   # Useful for debugging

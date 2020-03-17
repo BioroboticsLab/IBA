@@ -8,7 +8,7 @@
 | [[Examples]](https://github.com/BioroboticsLab/IBA/tree/master/notebooks)
 | [[Installation]](#installation)
 
-[![Build Status](https://travis-ci.com/BioroboticsLab/IBA.svg?branch=master)](https://travis-ci.com/BioroboticsLab/IBA)
+[![Build Status](https://travis-ci.org/BioroboticsLab/IBA.svg?branch=master)](https://travis-ci.org/BioroboticsLab/IBA)
 [![Documentation Status](https://readthedocs.org/projects/iba/badge/?version=latest)](https://iba.readthedocs.io/en/latest/?badge=latest)
 
 
@@ -117,7 +117,7 @@ The API documentation is hosted [here](https://iba.readthedocs.io/en/latest).
 
 | Notebook | Description |
 |----------|-------------|
-| [pytorch_IBA.ipynb](https://github.com/BioroboticsLab/IBA/tree/master/notebooks/pytorch_IBA.ipynb) | Per-Sample Bottleneck |
+| [pytorch_IBA_per_sample.ipynb](https://github.com/BioroboticsLab/IBA/tree/master/notebooks/pytorch_IBA_per_sample.ipynb) | Per-Sample Bottleneck |
 | [pytorch_IBA_train_readout.ipynb](https://github.com/BioroboticsLab/IBA/tree/master/notebooks/pytorch_IBA_train_readout.ipynb) | Train a Readout Bottleneck |
 | [tensorflow_IBALayer_cifar.ipynb](https://github.com/BioroboticsLab/IBA/tree/master/notebooks/tensorflow_IBALayer_cifar.ipynb) | Train a CIFAR model containing an IBALayer |
 | [tensorflow_IBACopy_imagenet.ipynb](https://github.com/BioroboticsLab/IBA/tree/master/notebooks/tensorflow_IBACopy_imagenet.ipynb) | Explains a ImageNet model |
