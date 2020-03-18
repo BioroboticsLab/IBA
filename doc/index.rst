@@ -7,7 +7,8 @@ Welcome to the documentation of IBA!
    :hidden:
 
    api/iba_pytorch
-   /iba_tensorflow_v1
+   api/iba_pytorch_readout
+   api/iba_tensorflow_v1
    api/utils
 
 
@@ -24,6 +25,7 @@ Modules
 -------
 
 * :doc:`api/iba_pytorch`:  :class:`IBA <IBA.pytorch.IBA>`
+* :doc:`api/iba_pytorch_readout`:  :class:`IBA <IBA.pytorch.IBAReadout>`
 * :doc:`api/iba_tensorflow_v1`: :class:`IBALayer <IBA.tensorflow_v1.IBALayer>`, :class:`IBACopy <IBA.tensorflow_v1.IBACopy>`, :class:`IBACopyInnvestigate <IBA.tensorflow_v1.IBACopyInnvestigate>`,
 * :doc:`api/utils`: :func:`plot_saliency_map() <IBA.utils.plot_saliency_map>`
 
