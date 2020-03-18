@@ -5,10 +5,10 @@
 | [[Paper Code]](https://github.com/BioroboticsLab/IBA-paper-code)
 | [[Reviews]](https://openreview.net/forum?id=S1xWh1rYwB)
 | [[API Documentation]](https://iba.readthedocs.io/en/latest/)
-| [[Examples]](notebooks)
+| [[Examples]](https://github.com/BioroboticsLab/IBA/tree/master/notebooks)
 | [[Installation]](#installation)
 
-[![Build Status](https://travis-ci.com/BioroboticsLab/IBA.svg?branch=master)](https://travis-ci.com/BioroboticsLab/IBA)
+[![Build Status](https://travis-ci.org/BioroboticsLab/IBA.svg?branch=master)](https://travis-ci.org/BioroboticsLab/IBA)
 [![Documentation Status](https://readthedocs.org/projects/iba/badge/?version=latest)](https://iba.readthedocs.io/en/latest/?badge=latest)
 
 
@@ -19,13 +19,23 @@
 
 
 This repository contains an easy-to-use implementation for the IBA attribution method.
-See our paper for a description: ["Restricting the Flow: Information
-Bottlenecks for Attribution"](https://openreview.net/forum?id=S1xWh1rYwB). We
-provide a [TensorFlow v1](https://www.tensorflow.org/) and
-a [PyTorch](https://pytorch.org/) implementation.
+Our methods minimizes the amount of transmitted information while retaining
+a high classifier score for the explained class. In our paper,
+we run this optimization per single sample (Per-Sample Bottleneck)
+and trained a neural network to predict the relevant areas (Readout Bottleneck).
+See our paper for a in-depth description: ["Restricting the Flow: Information
+Bottlenecks for Attribution"](https://openreview.net/forum?id=S1xWh1rYwB).
+
+Generally, we advise using the Per-Sample Bottleneck over the Readout
+Bottleneck. We saw it to perform better and is more flexible as it only requires to
+estimate the mean and variance of the feature map. The Readout Bottleneck has the
+advantage of producing attribution maps with a single forward pass once trained.
 
 For the code to reproduce our paper, see [IBA-paper-code](https://github.com/BioroboticsLab/IBA-paper-code).
 
+
+This library provides a [TensorFlow v1](https://www.tensorflow.org/) and
+a [PyTorch](https://pytorch.org/) implementation.
 
 ## PyTorch
 
@@ -51,7 +61,8 @@ model_loss_closure = lambda x: F.nll_loss(F.log_softmax(model(x), target)
 saliency_map = iba.analyze(img.to(dev), model_loss_closure)
 plot_saliency_map(saliency_map)
 ```
-gene
+
+We provide a notebook with the [Per-Sample Bottleneck](https://github.com/BioroboticsLab/IBA/blob/master/notebooks/pytorch_IBA_per_sample.ipynb) and the [Readout Bottleneck](https://github.com/BioroboticsLab/IBA/blob/master/notebooks/pytorch_IBA_train_readout.ipynb).
 
 ## Tensorflow
 
@@ -106,11 +117,11 @@ The API documentation is hosted [here](https://iba.readthedocs.io/en/latest).
 
 | Notebook | Description |
 |----------|-------------|
-| [pytorch_IBA.ipynb](notebooks/pytorch_IBA.ipynb) | Per-Sample Bottleneck |
-| [pytorch_IBA_train_readout.ipynb](notebooks/pytorch_IBA_train_readout.ipynb) | Train a Readout Bottleneck |
-| [tensorflow_IBALayer_cifar.ipynb](notebooks/tensorflow_IBALayer_cifar.ipynb) | Train a CIFAR model containing an IBALayer |
-| [tensorflow_IBACopy_imagenet.ipynb](notebooks/tensorflow_IBACopy_imagenet.ipynb) | Explains a ImageNet model |
-| [tensorflow_IBACopyInnvestigate_imagenet.ipynb](notebooks/tensorflow_IBACopyInnvestigate_imagenet.ipynb)| [innvestigate](https://github.com/albermax/innvestigate) api wrapper |
+| [pytorch_IBA_per_sample.ipynb](https://github.com/BioroboticsLab/IBA/tree/master/notebooks/pytorch_IBA_per_sample.ipynb) | Per-Sample Bottleneck |
+| [pytorch_IBA_train_readout.ipynb](https://github.com/BioroboticsLab/IBA/tree/master/notebooks/pytorch_IBA_train_readout.ipynb) | Train a Readout Bottleneck |
+| [tensorflow_IBALayer_cifar.ipynb](https://github.com/BioroboticsLab/IBA/tree/master/notebooks/tensorflow_IBALayer_cifar.ipynb) | Train a CIFAR model containing an IBALayer |
+| [tensorflow_IBACopy_imagenet.ipynb](https://github.com/BioroboticsLab/IBA/tree/master/notebooks/tensorflow_IBACopy_imagenet.ipynb) | Explains a ImageNet model |
+| [tensorflow_IBACopyInnvestigate_imagenet.ipynb](https://github.com/BioroboticsLab/IBA/tree/master/notebooks/tensorflow_IBACopyInnvestigate_imagenet.ipynb)| [innvestigate](https://github.com/albermax/innvestigate) api wrapper |
 
 
 ## Installation

@@ -4,7 +4,9 @@ os: linux
 env: KERAS="keras==2.2.5"
 jobs:
     include:
-        # PyTorch versions
+        # empty, use only setup.py dependencies
+        - python: 3.7
+          env: TORCH= TV= TF= TFP=
         - python: 3.7
           env: TORCH=torch==1.1.0 TV=torchvision==0.3.0
             TF=tensorflow==1.15.2 TFP="tensorflow-probability==0.7.0"
@@ -43,12 +45,14 @@ install:
 
   #  Pillow 7.0.0 break torchvision: https://github.com/pytorch/vision/issues/1712
   - conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION
-        numpy pytest h5py nose Pillow=6.1.0
   - source activate test-environment
   - echo pip install $TF $TFP $KERAS $TORCH $TV
-  - pip install -f https://download.pytorch.org/whl/torch_stable.html
-        $TF $TFP $KERAS $TORCH $TV
-  - pip install ".[dev, torch, tensorflow]"
+  # if not empty configuration
+  - if [ "$TORCH" != "" ]; then
+        pip install -f https://download.pytorch.org/whl/torch_stable.html
+                $TF $TFP $KERAS $TORCH $TV;
+    fi
+  - pip install ".[dev, torch, tensorflow-v1]"
   - KERAS_BACKEND=tensorflow
   # Useful for debugging
   - pip freeze
