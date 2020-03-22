@@ -15,10 +15,11 @@ class IBAReadout(IBA):
     from a readout network. The readout network is trained on intermediate feature maps
     which are obtained by performing a nested forward pass on the model and recording
     activations.
+
     Major differences to the Per-Sample IBA:
-    - an additional context manager for the nested pass
-    - additional hooks to collect the input and the feature maps in the nested pass
-    - a readout network of three 1x1 conv. layers to yield alpha
+    * an additional context manager for the nested pass
+    * additional hooks to collect the input and the feature maps in the nested pass
+    * a readout network of three 1x1 conv. layers to yield alpha
     """
     def __init__(self, attach_layer, readout_layers, model, estimator_type=None, **kwargs):
         super().__init__(attach_layer, **kwargs)
@@ -115,7 +116,10 @@ class IBAReadout(IBA):
         self._input_hook = model.register_forward_pre_hook(input_hook)
 
     def reset_estimate(self):
-        """ Additionaly reset estimators of bottleneck layers. """
+        """
+        Equivalent to ``IBA.reset_estimate``, but additionaly resets
+        estimators of bottleneck layers.
+        """
         super().reset_estimate()
         self._readout_estimators = ModuleList([self._estimator_type() for _ in self.layers])
 
@@ -140,7 +144,7 @@ class IBAReadout(IBA):
         recorded feature maps in a 3-layer Readout Network to generate alpha.
         """
         # Run a nested pass to obtain feature maps, stored in self._readout_values
-        with self.nested_pass():
+        with self._nested_pass():
             self._model_fn(self._last_input)
 
         # Normalize using the estimators
@@ -172,7 +176,7 @@ class IBAReadout(IBA):
         return alpha
 
     @contextmanager
-    def nested_pass(self):
+    def _nested_pass(self):
         """
         Context manager to pass the input once though the model in a nested pass to
         obtain the readout feature maps. These are then used as the input for the readout

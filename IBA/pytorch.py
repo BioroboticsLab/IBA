@@ -300,7 +300,7 @@ class IBA(nn.Module):
             self.smooth = None
 
     def detach(self):
-        """ Remove the bottleneck to restore the original model """
+        """ Remove the bottleneck to restore the original model. """
         if self._hook_handle is not None:
             self._hook_handle.remove()
             self._hook_handle = None
@@ -312,8 +312,8 @@ class IBA(nn.Module):
         You don't need to call this method manually.
 
         The IBA acts as a model layer, passing the information in `x` along to the next layer
-        either as-is or by restricting the flow of infomration.
-        We use it also to estimate the distribution of `x` passing through the layer.
+        either as-is or by restricting the flow of information.
+        We use this point also to estimate the distribution of `x` passing through the layer.
         """
         if self._restrict_flow:
             return self._do_restrict_information(x, self.alpha)
