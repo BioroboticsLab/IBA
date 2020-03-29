@@ -245,7 +245,6 @@ class IBA(nn.Module):
         self._buffer_capacity = None  # Filled on forward pass, used for loss
         self.sigma = sigma
         self.estimator = estimator or TorchWelfordEstimator()
-        self.device = None
         self._estimate = False
         self._mean = feature_mean
         self._std = feature_std
@@ -316,6 +315,8 @@ class IBA(nn.Module):
         We use this point also to estimate the distribution of `x` passing through the layer.
         """
         if self._restrict_flow:
+            if self.alpha is None:
+                raise RuntimeWarning("Alpha not initialized. Run _init() before using the bottleneck.")
             return self._do_restrict_information(x, self.alpha)
         if self._estimate:
             self.estimator(x)
@@ -352,8 +353,6 @@ class IBA(nn.Module):
 
     def _do_restrict_information(self, x, alpha):
         """ Selectively remove information from x by applying noise """
-        if self.alpha is None:
-            raise RuntimeWarning("Alpha not initialized. Run _init() before using the bottleneck.")
 
         if self._mean is None:
             self._mean = self.estimator.mean()
@@ -378,9 +377,10 @@ class IBA(nn.Module):
         mu = x_norm * lamb
 
         # Sample new output values from p(z|x)
-        eps = mu.data.new(mu.size()).normal_()
-        z_norm = x_norm * lamb + (1-lamb) * eps
+        eps = lamb.data.new(lamb.size()).normal_()
+        z_norm = mu + (1-lamb) * eps
         self._buffer_capacity = self._calc_capacity(mu, log_var) * self._active_neurons
+        self._buffer_alpha = alpha.clone().detach()
 
         # Denormalize z to match original magnitude of x
         z = z_norm * self._std + self._mean
@@ -520,7 +520,7 @@ class IBA(nn.Module):
                           f"samples. Might not be enough! We recommend 10.000 samples.")
         std = self.estimator.std()
         self._active_neurons = self.estimator.active_neurons(active_neurons_threshold).float()
-        self._std = torch.max(std, min_std*torch.ones_like(std))
+        self._std = torch.max(std, torch.tensor(min_std, device=std.device))
 
         self._loss = []
         self._model_loss = []

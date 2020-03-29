@@ -45,6 +45,8 @@ class IBAReadout(IBA):
 
     def _build(self):
         super()._build()
+        # We do not need alpha
+        self.alpha = None
         # Use the estimators to get feature map dimensions
         features_in = sum(map(lambda e: e.shape[0], self._readout_estimators))
         features_out = self.estimator.shape[-3]
@@ -72,6 +74,22 @@ class IBAReadout(IBA):
             self._readout_hooks = [None for _ in self._readout_hooks]
 
     def analyze(self, input_t, model, mode='saliency', **kwargs):
+        """
+        Use the trained Readout IBA to find relevant regions in the input.
+        The input is passed through the network and the Readout Bottleneck restricts
+        the information flow. The capacity at each pixel is then returned as saliency
+        map, similar to the Per-Sample IBA.
+
+        Args:
+            input_t: input image of shape (1, C, H W)
+            model: the model containing the trained bottleneck
+            mode: how to post-process the resulting map: 'saliency' (default) or 'capacity'
+
+        Returns:
+            The heatmap of the same shape as the ``input_t``.
+
+        Additional arguments are ignored.
+        """
         if len(kwargs) > 0:
             warnings.warn(f"Additional arguments ({list(kwargs.keys())}) "
                           " are ignored in the Readout IBA.")
@@ -144,11 +162,12 @@ class IBAReadout(IBA):
         recorded feature maps in a 3-layer Readout Network to generate alpha.
         """
         # Run a nested pass to obtain feature maps, stored in self._readout_values
-        with self._nested_pass():
+        with self._enable_nested_pass(), torch.no_grad():
             self._model_fn(self._last_input)
 
         # Normalize using the estimators
-        readouts = [(r - e.mean()) / e.std()
+        min_std_t = torch.tensor(self.min_std, device=self._last_input.device)
+        readouts = [(r - e.mean()) / torch.max(e.std(), min_std_t)
                     for r, e in zip(self._readout_values, self._readout_estimators)]
 
         # Resize to fit shape of bottleneck layer
@@ -176,7 +195,7 @@ class IBAReadout(IBA):
         return alpha
 
     @contextmanager
-    def _nested_pass(self):
+    def _enable_nested_pass(self):
         """
         Context manager to pass the input once though the model in a nested pass to
         obtain the readout feature maps. These are then used as the input for the readout
