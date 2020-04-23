@@ -7,7 +7,7 @@ Welcome to the documentation of IBA!
    :hidden:
 
    api/iba_pytorch
-   /iba_tensorflow_v1
+   api/iba_tensorflow_v1
    api/utils
 
 
