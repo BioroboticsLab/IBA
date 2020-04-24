@@ -1,5 +1,6 @@
 weights/
 data/imagenet/
+test/notebooks/asserts/
 data/imagenet
 pretrained/
 results/
@@ -10,6 +11,7 @@ cov_html/
 notebooks/imagenet
 notebooks/check_sha256sum.txt
 *.h5
+*.npz
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

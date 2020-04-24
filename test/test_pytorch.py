@@ -99,3 +99,47 @@ def test_pytorch():
 
     with pytest.raises(ValueError):
         iba.detach()
+
+
+def test_pytest_readme():
+    # resembles the example in the readme
+    # small changes to be fast and run on travis
+    from IBA.pytorch import IBA, tensor_to_np_img
+    from IBA.utils import plot_saliency_map, to_unit_interval
+
+    import torch
+    from torch.utils.data import DataLoader
+    from torchvision.datasets import CIFAR10
+    from torchvision.transforms import ToTensor
+
+    # Initialize some pre-trained model to analyze
+    dev = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
+    # Load model
+    model = Net()
+    model.to(dev)
+
+    # setup data loader
+    val_set = CIFAR10(".", train=False, download=True, transform=ToTensor())
+    val_loader = DataLoader(val_set, batch_size=50, shuffle=True, num_workers=4)
+
+    # Add a Per-Sample Bottleneck at layer conv4_1
+    if version.parse(torch.__version__) < version.parse("1.2.0"):
+        iba = IBA()
+        model.conv2 = nn.Sequential(model.conv2, iba)
+    else:
+        iba = IBA(model.conv2)
+
+    # Estimate the mean and variance of the feature map at this layer.
+    iba.estimate(model, val_loader, n_samples=100, progbar=True)
+
+    # Explain class target for the given image
+    img, target = val_set[0]
+    saliency_map = iba.analyze(
+        img.unsqueeze(0).to(dev),
+        lambda x: -torch.log_softmax(model(x), dim=1)[:, target].mean(),
+        beta=10)
+
+    # display result
+    np_img = to_unit_interval(tensor_to_np_img(img))
+    plot_saliency_map(saliency_map, np_img)

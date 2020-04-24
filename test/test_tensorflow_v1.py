@@ -103,6 +103,11 @@ def test_iba_layer(tmpdir):
             x = np.random.uniform(size=(2, 32, 32, 3))
             yield {model.input: x}
 
+    hyperparams = {'batch_size': 10, 'steps': 10, 'beta': 1, 'learning_rate': 1,
+                   'min_std': 0.01, 'smooth_std': 1, 'normalize_beta': True}
+    iba.set_default(**hyperparams)
+    assert iba.get_default() == hyperparams
+
     iba.fit_generator(generator(), n_samples=15)
 
     # setup model loss
@@ -227,7 +232,9 @@ def test_copy_graph_raw():
     mean = np.random.uniform(size=shape)
     std = np.random.uniform(size=shape)
 
-    analyzer = IBACopy(feat_layer.output, [model.output.name], feature_mean_std=[mean, std])
+    analyzer = IBACopy(feat_layer.output, [model.output.name],
+                       feature_mean=mean, feature_std=std,
+                       feature_active=np.ones_like(std))
     analyzer.assert_variables_equal()
 
     x = np.random.normal(size=(1, ) + INPUT_SHAPE)
