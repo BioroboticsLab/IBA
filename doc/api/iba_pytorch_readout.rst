@@ -1,7 +1,7 @@
 
-IBA.pytorch
+IBA.pytorch_readout
 ===========================================
 
-.. automodule:: IBA.pytorch
+.. automodule:: IBA.pytorch_readout
     :members:
     :show-inheritance:
