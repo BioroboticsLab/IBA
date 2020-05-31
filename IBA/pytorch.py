@@ -28,9 +28,8 @@ import torch.nn as nn
 import torch
 import warnings
 from contextlib import contextmanager
-from skimage.transform import resize
 from torchvision.transforms import Normalize, Compose
-from IBA.utils import _to_saliency_map, get_tqdm
+from IBA.utils import _to_saliency_map, get_tqdm, ifnone
 
 # Helper Functions
 
@@ -64,6 +63,32 @@ def tensor_to_np_img(img_t):
         Normalize(mean=[0, 0, 0], std=[1 / 0.229, 1 / 0.224, 1 / 0.225]),
         Normalize(std=[1, 1, 1], mean=[-0.485, -0.456, -0.406]),
     ])(img_t).detach().cpu().numpy().transpose(1, 2, 0)
+
+
+def imagenet_transform(resize=256, crop_size=224):
+    """Returns the default torchvision imagenet transform. """
+    from torchvision.transforms import Compose, CenterCrop, ToTensor, Resize, Normalize
+    return Compose([
+        Resize(resize),
+        CenterCrop(crop_size),
+        ToTensor(),
+        Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+
+def get_imagenet_folder(path, image_size=224, transform='default'):
+    """
+    Returns a ``torchvision.datasets.ImageFolder`` with the default
+    torchvision preprocessing.
+    """
+    from torchvision.datasets import ImageFolder
+    from torchvision.transforms import Compose, CenterCrop, ToTensor, Resize, Normalize
+    if transform == 'default':
+        transform = Compose([
+            CenterCrop(256), Resize(image_size), ToTensor(),
+            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    return ImageFolder(path, transform=transform)
 
 
 class _SpatialGaussianKernel(nn.Module):
@@ -180,6 +205,18 @@ class _InterruptExecution(Exception):
     pass
 
 
+class _IBAForwardHook:
+    def __init__(self, iba, input_or_output="output"):
+        self.iba = iba
+        self.input_or_output = input_or_output
+
+    def __call__(self, m, inputs, outputs):
+        if self.input_or_output == "input":
+            return self.iba(inputs)
+        elif self.input_or_output == "output":
+            return self.iba(outputs)
+
+
 class IBA(nn.Module):
     """
     IBA finds relevant features of your model by applying noise to
@@ -214,6 +251,7 @@ class IBA(nn.Module):
             over very few iterations, a relatively high learning rate
             can be used compared to the training of the model itself.
         batch_size: Number of samples to use per iteration
+        input_or_output: Select either ``"output"`` or ``"input"``.
         initial_alpha: Initial value for the parameter.
     """
     def __init__(self,
@@ -230,6 +268,7 @@ class IBA(nn.Module):
                  feature_std=None,
                  estimator=None,
                  progbar=False,
+                 input_or_output="output",
                  relu=False):
         super().__init__()
         self.relu = relu
@@ -244,7 +283,8 @@ class IBA(nn.Module):
         self.sigmoid = nn.Sigmoid()
         self._buffer_capacity = None  # Filled on forward pass, used for loss
         self.sigma = sigma
-        self.estimator = estimator or TorchWelfordEstimator()
+        self.estimator = ifnone(estimator, TorchWelfordEstimator())
+        self.device = None
         self._estimate = False
         self._mean = feature_mean
         self._std = feature_std
@@ -268,8 +308,16 @@ class IBA(nn.Module):
             finally:
                 pass  # Do not complain if packaging is not installed
 
+            # self._hook_handle = layer.register_forward_hook(lambda m, x, y: self(y))
+
+            # for handle, hooks in layer._forward_hooks.items():
+            #     if type(hooks) == _IBAForwardHook:
+            #         raise ValueError("Another IBA object is already attacted to the layer. "
+            #                          "Remove it by calling `detach()`")
+
             # Attach the bottleneck after the model layer as forward hook
-            self._hook_handle = layer.register_forward_hook(lambda m, x, y: self(y))
+            self._hook_handle = layer.register_forward_hook(
+                _IBAForwardHook(self, input_or_output))
 
         else:
             pass
@@ -299,7 +347,7 @@ class IBA(nn.Module):
             self.smooth = None
 
     def detach(self):
-        """ Remove the bottleneck to restore the original model. """
+        """ Remove the bottleneck to restore the original model """
         if self._hook_handle is not None:
             self._hook_handle.remove()
             self._hook_handle = None
@@ -311,13 +359,11 @@ class IBA(nn.Module):
         You don't need to call this method manually.
 
         The IBA acts as a model layer, passing the information in `x` along to the next layer
-        either as-is or by restricting the flow of information.
-        We use this point also to estimate the distribution of `x` passing through the layer.
+        either as-is or by restricting the flow of infomration.
+        We use it also to estimate the distribution of `x` passing through the layer.
         """
         if self._restrict_flow:
-            if self.alpha is None:
-                raise RuntimeWarning("Alpha not initialized. Run _init() before using the bottleneck.")
-            return self._do_restrict_information(x, self.alpha)
+            return self._do_restrict_information(x)
         if self._estimate:
             self.estimator(x)
         if self._interrupt_execution:
@@ -351,8 +397,22 @@ class IBA(nn.Module):
         """ Return the feature-wise KL-divergence of p(z|x) and q(z) """
         return -0.5 * (1 + log_var - mu**2 - log_var.exp())
 
-    def _do_restrict_information(self, x, alpha):
+    @staticmethod
+    def _kl_div(r, lambda_, mean_r, std_r):
+        r_norm = (r - mean_r) / std_r
+        var_z = (1 - lambda_) ** 2
+
+        log_var_z = torch.log(var_z)
+
+        mu_z = r_norm * lambda_
+
+        capacity = -0.5 * (1 + log_var_z - mu_z**2 - var_z)
+        return capacity
+
+    def _do_restrict_information(self, x):
         """ Selectively remove information from x by applying noise """
+        if self.alpha is None:
+            raise RuntimeWarning("Alpha not initialized. Run _init() before using the bottleneck.")
 
         if self._mean is None:
             self._mean = self.estimator.mean()
@@ -364,27 +424,19 @@ class IBA(nn.Module):
             self._active_neurons = self.estimator.active_neurons()
 
         # Smoothen and expand alpha on batch dimension
-        lamb = self.sigmoid(alpha)
+        lamb = self.sigmoid(self.alpha)
         lamb = lamb.expand(x.shape[0], x.shape[1], -1, -1)
         lamb = self.smooth(lamb) if self.smooth is not None else lamb
 
-        # Normalize x
-        x_norm = (x - self._mean) / self._std
+        self._buffer_capacity = self._kl_div(x, lamb, self._mean, self._std) * self._active_neurons
 
-        # Get sampling parameters
-        var = (1 - lamb) ** 2
-        log_var = torch.log(var)
-        mu = x_norm * lamb
+        eps = x.data.new(x.size()).normal_()
+        ε = self._std * eps + self._mean
+        λ = lamb
+        z = λ * x + (1 - λ) * ε
+        z *= self._active_neurons
 
         # Sample new output values from p(z|x)
-        eps = lamb.data.new(lamb.size()).normal_()
-        z_norm = mu + (1-lamb) * eps
-        self._buffer_capacity = self._calc_capacity(mu, log_var) * self._active_neurons
-        self._buffer_alpha = alpha.clone().detach()
-
-        # Denormalize z to match original magnitude of x
-        z = z_norm * self._std + self._mean
-        z *= self._active_neurons
 
         # Clamp output, if input was post-relu
         if self.relu:
@@ -502,12 +554,13 @@ class IBA(nn.Module):
         """
         assert input_t.shape[0] == 1, "We can only fit one sample a time"
 
-        beta = beta or self.beta
-        optimization_steps = optimization_steps or self.optimization_steps
-        min_std = min_std or self.min_std
-        lr = lr or self.lr
-        batch_size = batch_size or self.batch_size
-        active_neurons_threshold = active_neurons_threshold or self.active_neurons_threshold
+        # TODO: is None
+        beta = ifnone(beta, self.beta)
+        optimization_steps = ifnone(optimization_steps, self.optimization_steps)
+        min_std = ifnone(min_std, self.min_std)
+        lr = ifnone(lr, self.lr)
+        batch_size = ifnone(batch_size, self.batch_size)
+        active_neurons_threshold = ifnone(active_neurons_threshold, self._active_neurons_threshold)
 
         batch = input_t.expand(batch_size, -1, -1, -1)
 
@@ -520,9 +573,10 @@ class IBA(nn.Module):
                           f"samples. Might not be enough! We recommend 10.000 samples.")
         std = self.estimator.std()
         self._active_neurons = self.estimator.active_neurons(active_neurons_threshold).float()
-        self._std = torch.max(std, torch.tensor(min_std, device=std.device))
+        self._std = torch.max(std, min_std*torch.ones_like(std))
 
         self._loss = []
+        self._alpha_grads = []
         self._model_loss = []
         self._information_loss = []
 
@@ -545,6 +599,7 @@ class IBA(nn.Module):
                 loss.backward()
                 optimizer.step()
 
+                self._alpha_grads.append(self.alpha.grad.cpu().numpy())
                 self._loss.append(loss.item())
                 self._model_loss.append(model_loss.item())
                 self._information_loss.append(information_loss.item())

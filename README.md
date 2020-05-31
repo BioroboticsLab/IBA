@@ -39,27 +39,45 @@ a [PyTorch](https://pytorch.org/) implementation.
 
 ## PyTorch
 
-Examplary usage:
+Examplary usage for the Per-Sample Bottleneck:
+
 ```python
-from IBA.pytorch import IBA, plot_saliency_map
+from IBA.pytorch import IBA, tensor_to_np_img, get_imagenet_folder, imagenet_transform
+from IBA.utils import plot_saliency_map, to_unit_interval, load_monkeys
 
-# Initialize some pre-trained model to analyze
-model = Net()
+from torch.utils.data import DataLoader
+from torchvision.models import vgg16
+import torch
 
-# Create the Per-Sample Bottleneck at a certain layer:
-iba = IBA(model.conv4)
+# imagenet_dir = /path/to/imagenet/validation
 
-# Estimate the mean and variance of features at this layer.
-iba.estimate(model, datagen)
+# Load model
+dev = 'cuda:0' if  torch.cuda.is_available() else 'cpu'
+model = vgg16(pretrained=True)
+model.to(dev)
 
-img, target = next(iter(datagen(batch_size=1)))
+# Add a Per-Sample Bottleneck at layer conv4_1
+iba = IBA(model.features[17])
+
+# Estimate the mean and variance of the feature map at this layer.
+val_set = get_imagenet_folder(imagenet_dir)
+val_loader = DataLoader(val_set, batch_size=64, shuffle=True, num_workers=4)
+iba.estimate(model, val_loader, n_samples=5000, progbar=True)
+
+# Load Image
+monkeys, target = load_monkeys(pil=True)
+monkeys_transform = imagenet_transform()(monkeys)
 
 # Closure that returns the loss for one batch
-model_loss_closure = lambda x: F.nll_loss(F.log_softmax(model(x), target)
+model_loss_closure = lambda x: -torch.log_softmax(model(x), dim=1)[:, target].mean()
 
 # Explain class target for the given image
-saliency_map = iba.analyze(img.to(dev), model_loss_closure)
-plot_saliency_map(saliency_map)
+saliency_map = iba.analyze(monkeys_transform.unsqueeze(0).to(dev), model_loss_closure, beta=10)
+
+# display result
+model_loss_closure = lambda x: -torch.log_softmax(model(x), 1)[:, target].mean()
+heatmap = iba.analyze(monkeys_transform[None].to(dev), model_loss_closure )
+plot_saliency_map(heatmap, tensor_to_np_img(monkeys_transform))
 ```
 
 We provide a notebook with the [Per-Sample Bottleneck](https://github.com/BioroboticsLab/IBA/blob/master/notebooks/pytorch_IBA_per_sample.ipynb) and the [Readout Bottleneck](https://github.com/BioroboticsLab/IBA/blob/master/notebooks/pytorch_IBA_train_readout.ipynb).
@@ -67,18 +85,20 @@ We provide a notebook with the [Per-Sample Bottleneck](https://github.com/Biorob
 ## Tensorflow
 
 ```python
-from IBA.tensorflow_v1 import IBACopyInnvestigate, plot_saliency_map
+from IBA.tensorflow_v1 import IBACopyInnvestigate, model_wo_softmax, get_imagenet_generator
+from IBA.utils import load_monkeys, plot_saliency_map
+from keras.applications.vgg16 import VGG16, preprocess_input
 
-# load model
+# imagenet_dir = /path/to/imagenet/validation
+
+# load model & remove the final softmax layer
 model_softmax = VGG16(weights='imagenet')
-
-# remove the final softmax layer
 model = model_wo_softmax(model_softmax)
 
-# select layer after which the bottleneck will be inserted
-feat_layer = model.get_layer(name='block3_conv2')
+# after layer block4_conv1 the bottleneck will be added
+feat_layer = model.get_layer(name='block4_conv1')
 
-# copies the model
+# add the bottleneck by coping the model
 iba = IBACopyInnvestigate(
     model,
     neuron_selection_mode='index',
@@ -86,11 +106,16 @@ iba = IBACopyInnvestigate(
 )
 
 # estimate feature mean and std
-iba.fit_generator(image_generator(), steps_per_epoch=50)
+val_gen = get_imagenet_generator(imagenet_dir)
+iba.fit_generator(val_gen, steps_per_epoch=50)
+
+# load image
+monkeys, target = load_monkeys()
+monkeys_scaled =  preprocess_input(monkeys)
 
 # get the saliency map and plot
-saliency_map = iba.analyze(monkey, neuron_selection=monkey_target)
-plot_saliency_map(saliency_map, img=norm_image(monkey[0]))
+saliency_map = iba.analyze(monkeys_scaled[None], neuron_selection=target)
+plot_saliency_map(saliency_map, img=monkeys)
 ```
 
 **Table:** Overview over the different tensorflow classes.

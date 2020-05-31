@@ -189,6 +189,42 @@ def to_saliency_map(capacity, shape=None, data_format=None):
     return _to_saliency_map(capacity, shape, data_format)
 
 
+def get_imagenet_generator(path,
+                           target_size=(256, 256),
+                           crop_size=(224, 224),
+                           batch_size=50,
+                           seed=0,
+                           preprocess_input=None,
+                           **kwargs):
+    """
+    Yields ``(image_batch, targets)`` from the given imagenet directory.
+
+    Args:
+        path (str): ImageNet directory. Must point to the ``train`` or ``validation`` directory.
+        image_size (tuple): Scale image to this size.
+        batch_size (int): Batch size.
+        seed (int): Random seed
+        preprocess_input (function): model precessing function.
+            Default: ``keras.applications.resnet50`` which is used by most keras models.
+    """
+    from keras.applications.resnet50 import preprocess_input as default_preprocess
+    preprocess_input = preprocess_input or default_preprocess
+    image_generator = tf.keras.preprocessing.image.ImageDataGenerator(
+        preprocessing_function=preprocess_input
+    )
+
+    for imgs, targets in image_generator.flow_from_directory(
+            path, seed=seed, batch_size=batch_size, target_size=target_size, **kwargs):
+        if crop_size is not None:
+            ch, cw = crop_size
+            b, h, w, c = imgs.shape
+            pt = (h - ch)//2
+            pl = (w - cw)//2
+            yield imgs[:, pt:pt+ch, pl:pl+cw], targets
+        else:
+            yield imgs, targets
+
+
 def _kl_div(r, lambda_, mean_r, std_r):
     r_norm = (r - mean_r) / std_r
     var_z = (1 - lambda_) ** 2
@@ -212,7 +248,7 @@ def _gaussian_kernel(size, std):
 def _gaussian_blur(x, std=1.):
 
     # Cover 2.5 stds in both directions
-    kernel_size = tf.cast((tf.round(2 * std)) * 2 + 1, tf.int32)
+    kernel_size = tf.cast((tf.round(4 * std)) * 2 + 1, tf.int32)
 
     kernel = _gaussian_kernel(kernel_size // 2, std)
     kernel = kernel[:, :, None, None]
@@ -294,24 +330,64 @@ class IBALayer(keras.layers.Layer):
         saliency_map = iba.analyze({model.input: ex_image, target: ex_target})
 
 
+    Hyperparamters Paramters:
+        The informational bottleneck attribution has a few hyperparameters. They
+        most important parameter is the ``beta`` which controls the trade-off
+        between model loss. Generally, ``beta = 10`` works well.  Other
+        hyperparameters are the number of optimization ``steps``. The
+        ``learning_rate`` of the optimizer.  The smoothing of the feature map
+        and the minimum feature standard derviation.  All hyperparamters set in
+        the constructure can be overriden in the :meth:`analyze` method or in
+        the :meth:`set_default` method.
+
     Args:
         estimator (TFWelfordEstimator): already fitted estimator.
-        feature_mean_std (tuple): tuple of estimated feature ``(mean, std)``.
+        feature_mean: estimated feature mean.
             Do not provide ``feature_mean_std`` and ``estimator``.
+        feature_std: estimated feature std.
+        feature_active: estimated active neurons. If ``feature_active[i] = 0``, the i-th  neuron
+            will be set to zero and no information is added for this neuron.
+        batch_size (int): Default number of samples to average the gradient.
+        steps (int): Default number of iterations to optimize.
+        beta (int): Default value for trade-off between model loss and information loss.
+        learning_rate (float): Default learning rate of the Adam optimizer.
+        min_std (float): Default minimum feature standard derivation.
+        smooth_std (float): Default smoothing of the lambda parameter. Set to ``0`` to disable.
+        normalize_beta (bool): Default flag to devide beta by the nubmer of feature
+            neurons (default: ``True``).
         **kwargs: keras layer kwargs, see ``keras.layers.Layer``
     """
-    def __init__(self, estimator=None, feature_mean_std=None, **kwargs):
+    def __init__(self, estimator=None,
+                 feature_mean=None,
+                 feature_std=None,
+                 feature_active=None,
+                 # default hyper parameters
+                 batch_size=10,
+                 steps=10,
+                 beta=10,
+                 learning_rate=1,
+                 min_std=0.01,
+                 smooth_std=1.,
+                 normalize_beta=True,
+                 **kwargs):
         self._estimator = estimator
         self._model_loss_set = False
 
-        if feature_mean_std is not None:
-            self._feature_mean_std_given = True
-            self._feature_mean = feature_mean_std[0]
-            self._feature_std = feature_mean_std[1]
-        else:
-            self._feature_mean_std_given = False
-            self._feature_mean = None
-            self._feature_std = None
+        self._feature_mean = feature_mean
+        self._feature_std = feature_std
+        self._feature_active = feature_active
+        self._feature_mean_std_given = (self._feature_mean is not None and
+                                        self._feature_std is not None)
+
+        self._default_hyperparams = {
+            "batch_size": batch_size,
+            "steps": steps,
+            "beta": beta,
+            "learning_rate": learning_rate,
+            "min_std": min_std,
+            "smooth_std": smooth_std,
+            "normalize_beta": normalize_beta,
+        }
 
         self._collect_names = []
 
@@ -323,6 +399,28 @@ class IBALayer(keras.layers.Layer):
     def _get_session(self, session=None):
         """ Returns session if not None or the keras or tensoflow default session.  """
         return session or keras.backend.get_session() or tf.get_default_session()
+
+    def set_default(self, batch_size=None, steps=None, beta=None, learning_rate=None,
+                    min_std=None, smooth_std=None, normalize_beta=None):
+        """Updates the default hyperparamter values. """
+        if batch_size is not None:
+            self._default_hyperparams['batch_size'] = batch_size
+        if steps is not None:
+            self._default_hyperparams['steps'] = steps
+        if beta is not None:
+            self._default_hyperparams['beta'] = beta
+        if learning_rate is not None:
+            self._default_hyperparams['learning_rate'] = learning_rate
+        if min_std is not None:
+            self._default_hyperparams['min_std'] = min_std
+        if smooth_std is not None:
+            self._default_hyperparams['smooth_std'] = smooth_std
+        if normalize_beta is not None:
+            self._default_hyperparams['normalize_beta'] = normalize_beta
+
+    def get_default(self):
+        """Returns the default hyperparamter values."""
+        return self._default_hyperparams
 
     # Reporting
 
@@ -374,17 +472,14 @@ class IBALayer(keras.layers.Layer):
         """Returns the report for the last run."""
         return self._log
 
-    # Building the layer
-
     def build(self, input_shape):
         """ Builds the keras layer given the input shape.  """
         shape = self._feature_shape = [1, ] + [int(d) for d in input_shape[1:]]
 
-        k = np.prod([int(s) for s in shape]).astype(np.float32)
         # optimization placeholders
         self._learning_rate = tf.get_variable('learning_rate', dtype=tf.float32, initializer=1.)
         self._beta = tf.get_variable('beta', dtype=tf.float32,
-                                     initializer=np.array(10./k).astype(np.float32))
+                                     initializer=np.array(10.).astype(np.float32))
 
         self._batch_size = tf.get_variable('batch_size', dtype=tf.int32, initializer=10)
 
@@ -401,6 +496,8 @@ class IBALayer(keras.layers.Layer):
         # std of feature map r
         self._std_r = tf.get_variable(
             name='std_r', trainable=False,  dtype=tf.float32, initializer=tf.zeros(shape))
+        self._active_neurons = tf.get_variable(
+            name='active_neurons', trainable=False,  dtype=tf.float32, initializer=tf.zeros(shape))
 
         # mask that indicate that no noise should be applied to a specific neuron
         self._pass_mask = tf.get_variable(name='pass_mask', trainable=False,
@@ -429,9 +526,6 @@ class IBALayer(keras.layers.Layer):
         if self._estimator is None and not self._feature_mean_std_given:
             self._estimator = TFWelfordEstimator(inputs.name)
 
-        # shape = [1,] + inputs.shape[1:].as_list()
-        # self.active_neurons = tf.get_variable('active_neurons', shape, trainable=False)
-
         feature = tf.cond(self._use_layer_input, lambda: inputs, lambda: self._feature)
 
         tile_batch_size = tf.cond(self._use_layer_input,
@@ -443,16 +537,17 @@ class IBALayer(keras.layers.Layer):
         restrict_mask = 1 - pass_mask
 
         std_r_min = tf.maximum(self._std_r, self._min_std_r)
-        std_r_min = tf.clip_by_value(std_r_min, np.exp(-10), np.exp(10))
 
         # std_too_low = tf.cast(self.std_x < self.min_std_r, tf.float32)
         # std_large_enough = tf.cast(self.std_x >= self.min_std_r, tf.float32)
 
         lambda_pre_blur = tf.sigmoid(self._alpha)
-        λ = _gaussian_blur(lambda_pre_blur, std=self._smooth_std)
+        # λ = _gaussian_blur(lambda_pre_blur, std=self._smooth_std)
+        λ = lambda_pre_blur
 
         # std normal noise N(0, 1)
-        std_normal = tf.random.normal(tile_shape)
+        noise_shape = [tile_batch_size] + R.get_shape().as_list()[1:]
+        std_normal = tf.random.normal(noise_shape)
 
         # ε ~ N(μ_r, σ_r)
         ε = std_r_min * std_normal + self._mean_r
@@ -461,11 +556,18 @@ class IBALayer(keras.layers.Layer):
 
         # let all information through for neurons in pass_mask
         Z_with_passing = restrict_mask * Z + pass_mask * R
+        Z_with_passing *= self._active_neurons
 
         output = tf.cond(self._restrict_flow, lambda: Z_with_passing, lambda: inputs)
         # save capacityies
-        self._capacity = _kl_div(R, λ, self._mean_r, std_r_min) * restrict_mask
-        self._capacity_mean = tf.reduce_sum(self._capacity) / tf.reduce_sum(restrict_mask)
+
+        self._capacity = (_kl_div(R, λ, self._mean_r, std_r_min) *
+                          restrict_mask * self._active_neurons)
+
+        self._capacity_no_nans = tf.where(tf.is_nan(self._capacity),
+                                          tf.zeros_like(self._capacity),
+                                          self._capacity)
+        self._capacity_mean = tf.reduce_sum(self._capacity_no_nans) / tf.reduce_sum(restrict_mask)
 
         # save tensors for report
         self._report('lambda_pre_blur', lambda_pre_blur)
@@ -473,6 +575,7 @@ class IBALayer(keras.layers.Layer):
         self._report('eps', ε)
         self._report('alpha', self._alpha)
         self._report('capacity', self._capacity)
+        self._report('capacity_no_nans', self._capacity_no_nans)
         self._report('capacity_mean', self._capacity_mean)
 
         self._report('perturbed_feature', Z)
@@ -547,8 +650,8 @@ class IBALayer(keras.layers.Layer):
 
         """
         self._optimizer = optimizer_cls(learning_rate=self._learning_rate)
-        information_loss = self._beta * self._capacity_mean
-        loss = model_loss + information_loss
+        information_loss = self._capacity_mean
+        loss = model_loss + self._beta * information_loss
         self._optimizer_step = self._optimizer.minimize(loss, var_list=[self._alpha])
 
         self._report('loss', loss)
@@ -618,13 +721,13 @@ class IBALayer(keras.layers.Layer):
                 break
 
     def analyze(self, feed_dict,
-                batch_size=10,
-                steps=10,
-                beta=10.,
-                learning_rate=1.,
-                min_std=0.01,
-                smooth_std=1.,
-                normalize_beta=True,
+                batch_size=None,
+                steps=None,
+                beta=None,
+                learning_rate=None,
+                min_std=None,
+                smooth_std=None,
+                normalize_beta=None,
                 session=None,
                 pass_mask=None,
                 progbar=False) -> np.ndarray:
@@ -669,18 +772,26 @@ class IBALayer(keras.layers.Layer):
     def _analyze_feature(self,
                          feature,
                          feed_dict,
-                         batch_size=10,
-                         steps=10,
-                         beta=10,
-                         learning_rate=100,
-                         min_std=0.01,
-                         smooth_std=1,
+                         batch_size=None,
+                         steps=None,
+                         beta=None,
+                         learning_rate=None,
+                         min_std=None,
+                         smooth_std=None,
                          normalize_beta=True,
                          pass_mask=None,
                          session=None,
                          progbar=False):
         if session is None:
             session = keras.backend.get_session()
+
+        batch_size = batch_size or self._default_hyperparams['batch_size']
+        steps = steps or self._default_hyperparams['steps']
+        beta = beta or self._default_hyperparams['beta']
+        learning_rate = learning_rate or self._default_hyperparams['learning_rate']
+        min_std = min_std or self._default_hyperparams['min_std']
+        smooth_std = smooth_std or self._default_hyperparams['smooth_std']
+        normalize_beta = normalize_beta or self._default_hyperparams['normalize_beta']
 
         if not hasattr(self, '_optimizer'):
             raise ValueError("Optimizer not build yet! You have to specify your model loss "
@@ -692,29 +803,33 @@ class IBALayer(keras.layers.Layer):
             # therefore, we have to denormalize beta:
             beta = beta * np.prod(feature.shape)
 
-        if not self._feature_mean_std_given:
-            assert self._estimator.n_samples() > 0
-
-            self._feature_mean = self._estimator.mean()
-            self._feature_std = self._estimator.std()
+        if self._feature_mean_std_given:
+            feature_mean = self._feature_mean
+            feature_std = self._feature_std
+            feature_active = self._feature_active
         else:
-            assert self._estimator is None or self._estimator.n_samples() == 0, \
-                "Estimator was fitted but you also provided feature_mean_std!"
+            assert self._estimator.n_samples() > 0
+            feature_mean = self._estimator.mean()
+            feature_std = self._estimator.std()
+            feature_active = self._estimator.active_neurons()
 
         def maybe_unsqueeze(x):
             if len(self._mean_r.shape) == len(x.shape) + 1:
                 return x[None]
             else:
                 return x
-        self._feature_mean = maybe_unsqueeze(self._feature_mean)
-        self._feature_std = maybe_unsqueeze(self._feature_std)
+
+        feature_mean = maybe_unsqueeze(feature_mean)
+        feature_std = maybe_unsqueeze(feature_std)
+        feature_active = maybe_unsqueeze(feature_active)
 
         # set hyperparameters
         assigns = [
             self._alpha.initializer,
             tf.variables_initializer(self._optimizer.variables()),
-            tf.assign(self._mean_r, self._feature_mean, name='assign_feature_mean'),
-            tf.assign(self._std_r, self._feature_std, name='assign_feature_std'),
+            tf.assign(self._mean_r, feature_mean, name='assign_feature_mean'),
+            tf.assign(self._std_r, feature_std, name='assign_feature_std'),
+            tf.assign(self._active_neurons, feature_active, name='assign_feature_std'),
             tf.assign(self._feature, feature, name='assign_feature'),
             tf.assign(self._beta, beta, name='assign_beta'),
             tf.assign(self._smooth_std, smooth_std, name='assign_smooth_std'),
@@ -778,6 +893,8 @@ class IBALayer(keras.layers.Layer):
             'estimator': self._estimator.state_dict(),
             'feature_mean': self._feature_mean,
             'feature_std': self._feature_std,
+            'feature_active': self._feature_active,
+            'default_hyperparams': self._default_hyperparams
         }
 
     def load_state_dict(self, state):
@@ -787,6 +904,7 @@ class IBALayer(keras.layers.Layer):
         self._estimator.load_state_dict(state['estimator'])
         self._feature_mean = state['feature_mean']
         self._feature_std = state['feature_std']
+        self._default_hyperparams = state['default_hyperparams']
 
 
 class IBACopy(IBALayer):
@@ -795,6 +913,7 @@ class IBACopy(IBALayer):
     IBACopy is useful for pretrained models which model definition you cannot alter.
     As tensorflow graphs are immutable, this class copies the original graph
     partially (using ``tf.import_graph_def``).
+
 
     .. warning ::
         Changes to your model after calling ``IBACopy`` have no effect on
@@ -817,15 +936,33 @@ class IBACopy(IBALayer):
             ``None``, the default session is used.
 
         copy_session_config: Session config for the newly created session.
+        batch_size (int): Default number of samples to average the gradient.
+        steps (int): Default number of iterations to optimize.
+        beta (int): Default value for trade-off between model loss and information loss.
+        learning_rate (float): Default learning rate of the Adam optimizer.
+        min_std (float): Default minimum feature standard derivation.
+        smooth_std (float): Default smoothing of the lambda parameter. Set to ``0`` to disable.
+        normalize_beta (bool): Default flag to devide beta by the nubmer of feature
+            neurons (default: ``True``).
         **keras_kwargs: layer kwargs, see ``keras.layers.Layer``.
     """
 
     def __init__(self, feature, outputs,
                  estimator=None,
-                 feature_mean_std=None,
+                 feature_mean=None,
+                 feature_std=None,
+                 feature_active=None,
                  graph=None,
                  session=None,
                  copy_session_config=None,
+                 # default hyper parameters
+                 batch_size=10,
+                 steps=10,
+                 beta=10,
+                 learning_rate=1,
+                 min_std=0.01,
+                 smooth_std=1,
+                 normalize_beta=True,
                  **keras_kwargs,
                  ):
         # The tensorflow graph is immutable. However, we have to add noise to get our
@@ -843,6 +980,7 @@ class IBACopy(IBALayer):
 
         if type(outputs) not in [list, tuple]:
             outputs = [outputs]
+
         self._output_names = [to_name(out) for out in outputs]
         self._feature_name = to_name(feature)
 
@@ -857,8 +995,11 @@ class IBACopy(IBALayer):
             copy_session_config = tf.ConfigProto(allow_soft_placement=True)
 
         super().__init__(estimator=estimator,
-                         feature_mean_std=feature_mean_std,
+                         feature_mean=feature_mean,
+                         feature_std=feature_std,
+                         feature_active=feature_active,
                          **keras_kwargs)
+
         if self._estimator is None and not self._feature_mean_std_given:
             self._estimator = TFWelfordEstimator(self._feature_name, graph=self._original_graph)
         # the new graph and session
@@ -937,13 +1078,13 @@ class IBACopy(IBALayer):
     def analyze(self,
                 feature_feed_dict,
                 copy_feed_dict,
-                batch_size=10,
-                steps=10,
-                beta=10,
-                learning_rate=1,
-                min_std=0.01,
-                smooth_std=1,
-                normalize_beta=True,
+                batch_size=None,
+                steps=None,
+                beta=None,
+                learning_rate=None,
+                min_std=None,
+                smooth_std=None,
+                normalize_beta=None,
                 session=None,
                 pass_mask=None,
                 progbar=False):
@@ -1118,6 +1259,9 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
         recommend to always use :class:`.IBALayer` if you can add it as a layer
         to your model.
 
+    Hyperparamters Paramters:
+        The innvestigate API requires that the hyperparameters are set in the
+        constructure. They can be overriden using the :meth:`set_default` method.
 
     Args:
         model (keras.Model): the explained model.
@@ -1125,6 +1269,14 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
             be one of ``"max_activation"``, ``"index"``, ``"all"``.
         estimator (TFWelfordEstimator): feature mean and std. estimator.
         feature_mean_std (tuple): tuple of estimated feature ``(mean, std)``.
+        batch_size (int): Default number of samples to average the gradient.
+        steps (int): Default number of iterations to optimize.
+        beta (int): Default value for trade-off between model loss and information loss.
+        learning_rate (float): Default learning rate of the Adam optimizer.
+        min_std (float): Default minimum feature standard derivation.
+        smooth_std (float): Default smoothing of the lambda parameter. Set to ``0`` to disable.
+        normalize_beta (bool): Default flag to devide beta by the nubmer of feature
+            neurons (default: ``True``).
         session: TensorFlow session corresponding to the ``model``. If
             ``None``, the default session is used.
         copy_session_config (dict): Session config for the newly created session.
@@ -1135,7 +1287,17 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
     def __init__(self, model,
                  neuron_selection_mode='max_activation',
                  feature_name=None,
-                 estimator=None, feature_mean_std=None,
+                 estimator=None,
+                 feature_mean=None,
+                 feature_std=None,
+                 feature_active=None,
+                 batch_size=10,
+                 steps=10,
+                 beta=10.,
+                 learning_rate=1,
+                 min_std=0.01,
+                 smooth_std=1,
+                 normalize_beta=True,
                  session=None,
                  copy_session_config=None,
                  disable_model_checks=False,
@@ -1145,8 +1307,11 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
                              "Please use the model_wo_softmax function!")
         output_names = [model.output.name]
         graph = model.input.graph
-        IBACopy.__init__(self, feature_name, output_names, estimator, feature_mean_std,
-                         graph, session, copy_session_config, **keras_kwargs)
+        IBACopy.__init__(self, feature_name, output_names, estimator,
+                         feature_mean, feature_std, feature_active,
+                         graph, session, copy_session_config, batch_size, steps, beta,
+                         learning_rate, min_std, smooth_std, normalize_beta,
+                         **keras_kwargs)
         _InnvestigateAPI.__init__(self, model, neuron_selection_mode)
         with self.copied_session_and_graph_as_default():
             IBALayer.set_classification_loss(self, self._outputs[0])
@@ -1164,7 +1329,8 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
         session = session or self._original_session
         super().fit({self._model.input: X}, session, run_kwargs)
 
-    def fit_generator(self, generator, steps_per_epoch=None, epochs=1, verbose=1, session=None):
+    def fit_generator(self, generator, steps_per_epoch=None, epochs=1, verbose=1,
+                      session=None, progbar=True):
         """
         Estimates the feature mean and std from the generator.
         Generally, we recommend run the estimation on about 5000 samples.
@@ -1178,6 +1344,7 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
             generator: Yields tuples of ``(samples, targets)``.
             steps_per_epoch (int): number of steps to run per epoch.
             epochs (int): number epoch to run.
+            TODO progbar (Bool): If ``1``, prints a progressbar.
             verbose (int): If ``1``, prints a progressbar.
             session (:obj:`tf.Session`, optional): tf session to evaluate the model.
         """
@@ -1236,6 +1403,8 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
             capacity = super().analyze(
                 feature_feed_dict={self._model.input: X},
                 copy_feed_dict={self.target: np.array([target])},
+
+
             )
             b, h, w, c = X.shape
             saliency_map = to_saliency_map(capacity, shape=(h, w))
@@ -1260,16 +1429,21 @@ class IBACopyInnvestigate(IBACopy, _InnvestigateAPI):
     @classmethod
     def _state_to_kwargs(clazz, state):
         estimator_state = state.pop("estimator")
+        feature_name = state.pop("feature_name")
+        default_hyperparams = state.pop('default_hyperparams')
         feature_mean = state.pop("feature_mean")
         feature_std = state.pop("feature_std")
-        feature_name = state.pop("feature_name")
-        kwargs = super()._state_to_kwargs(state)
-        kwargs['feature_name'] = feature_name
+        feature_active = state.pop("feature_active")
 
+        kwargs = super()._state_to_kwargs(state)
+        kwargs.update(default_hyperparams)
+        kwargs['feature_name'] = feature_name
         if estimator_state is not None:
             estimator = TFWelfordEstimator("")
             estimator.load_state_dict(estimator_state)
             kwargs['estimator'] = estimator
         else:
-            kwargs['feature_mean_std'] = (feature_mean, feature_std)
+            kwargs['feature_mean'] = feature_mean
+            kwargs['feature_std'] = feature_std
+            kwargs['feature_active'] = feature_active
         return kwargs

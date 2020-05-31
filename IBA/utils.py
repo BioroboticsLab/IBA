@@ -64,6 +64,10 @@ class WelfordEstimator:
     """
     def __init__(self):
         super().__init__()
+        self.reset()
+
+    def reset(self):
+        """Resets the estimates."""
         self.m = None
         self.s = None
         self._n_samples = 0
@@ -157,6 +161,44 @@ def get_tqdm():
         return tqdm
 
 
+def ifnone(a, b):
+    """If a is None return b."""
+    if a is None:
+        return b
+    else:
+        return a
+
+
+def to_unit_interval(x):
+    """Scales ``x`` to be in ``[0, 1]``."""
+    return (x - x.min()) / (x.max() - x.min())
+
+
+def load_monkeys(center_crop=True, size=224, pil=False):
+    """Returns the monkey test image."""
+    from urllib.request import urlopen
+    from io import BytesIO
+    from PIL import Image
+
+    if size is not None and type(size) == int:
+        size = (size, size)
+
+    resp = urlopen("http://farm1.static.flickr.com/95/247213534_e8be5222be.jpg")
+    img_bytes = resp.read()
+    img = Image.open(BytesIO(img_bytes))
+    target = 382
+    if pil:
+        return img, target
+
+    w, h = img.size
+    cl = (w - h) // 2
+    if center_crop:
+        img = img.crop((cl, 0, cl + h, h))
+    if size is not None:
+        img = img.resize(size)
+    return np.array(img), target
+
+
 def plot_saliency_map(saliency_map, img=None, ax=None,
                       colorbar_label='Bits / Pixel',
                       colorbar_fontsize=14,
@@ -185,13 +227,14 @@ def plot_saliency_map(saliency_map, img=None, ax=None,
     import matplotlib.pyplot as plt
     from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
     from mpl_toolkits.axes_grid1.axes_size import Fixed
+    from skimage.color import rgb2grey, grey2rgb
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(5.5, 4.0))
 
     if img is not None:
         # Underlay the image as greyscale
-        grey = img.mean(2)
-        ax.imshow(np.stack((grey, grey, grey), axis=2))
+        grey = grey2rgb(rgb2grey(img))
+        ax.imshow(grey)
 
     ax1_divider = make_axes_locatable(ax)
     if type(colorbar_size) == float:
@@ -209,7 +252,7 @@ def plot_saliency_map(saliency_map, img=None, ax=None,
     hmap_jet = cmap(norm(saliency_map))
     if img is not None:
         hmap_jet[:, :, -1] = (max_alpha - min_alpha)*norm(saliency_map) + min_alpha
-    ax.imshow(hmap_jet, alpha=1.)
+    ax.imshow(hmap_jet, alpha=max_alpha)
     cbar = mpl.colorbar.ColorbarBase(cax1, cmap=cmap, norm=norm)
     cbar.set_label(colorbar_label, fontsize=colorbar_fontsize)
 

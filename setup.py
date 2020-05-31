@@ -18,6 +18,7 @@ setuptools.setup(
             'pytest',
             'pytest-pep8',
             'pytest-cov',
+            'pytest-readme',
             'sphinx',
             'sphinx_rtd_theme',
             'sphinx-autobuild',
