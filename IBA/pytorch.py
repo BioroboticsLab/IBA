@@ -409,9 +409,9 @@ class IBA(nn.Module):
         capacity = -0.5 * (1 + log_var_z - mu_z**2 - var_z)
         return capacity
 
-    def _do_restrict_information(self, x):
+    def _do_restrict_information(self, x, alpha):
         """ Selectively remove information from x by applying noise """
-        if self.alpha is None:
+        if alpha is None:
             raise RuntimeWarning("Alpha not initialized. Run _init() before using the bottleneck.")
 
         if self._mean is None:
@@ -424,7 +424,7 @@ class IBA(nn.Module):
             self._active_neurons = self.estimator.active_neurons()
 
         # Smoothen and expand alpha on batch dimension
-        lamb = self.sigmoid(self.alpha)
+        lamb = self.sigmoid(alpha)
         lamb = lamb.expand(x.shape[0], x.shape[1], -1, -1)
         lamb = self.smooth(lamb) if self.smooth is not None else lamb
 
