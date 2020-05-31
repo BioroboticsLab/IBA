@@ -45,7 +45,7 @@ class IBAReadout(IBA):
 
     def _build(self):
         super()._build()
-        # We do not need alpha
+        # We do not need a persistent alpha, we will generate it in a nested pass
         self.alpha = None
         # Use the estimators to get feature map dimensions
         features_in = sum(map(lambda e: e.shape[0], self._readout_estimators))
@@ -190,7 +190,7 @@ class IBAReadout(IBA):
         alpha = self.conv3(alpha)
 
         # Keep alphas in a meaningful range during training
-        alpha.clamp(-self._alpha_bound, self._alpha_bound)
+        alpha = alpha.clamp(-self._alpha_bound, self._alpha_bound)
 
         return alpha
 
