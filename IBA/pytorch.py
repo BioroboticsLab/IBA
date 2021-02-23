@@ -399,39 +399,41 @@ class IBA(nn.Module):
 
     @staticmethod
     def _kl_div(r, lambda_, mean_r, std_r):
-        """Computes the KL Divergence between the noise (Q(Z)) and 
+        """Computes the KL Divergence between the noise (Q(Z)) and
             the noised activations P(Z|R))."""
         # We want to compute: KL(P(Z|R) || Q(Z))
-        # As both distributions are normal distribution, we need the 
+        # As both distributions are normal distribution, we need the
         # mean and variance of both. We can simplify the computation
         # by normalizing R to R' = (R - E[R]) / std(R) [1] and ε' ~ N(0,1).
         # The KL divergence is invariant under scaling.
-        # 
+        #
         # For the mean and var of Z|R, we have:
         # Z' = λ * R' + (1 - λ) * ε'
         # E[Z'|R'] = λ E[R']                    [2]
         # Var[Z'|R'] = (1 - λ)**2               [3]
-        # Remember that λ(R) and therefore the λ becomes a constant if 
+        # Remember that λ(R) and therefore the λ becomes a constant if
         # R is given.
         #
 
-        
+
         # Normalizing [1]
         r_norm = (r - mean_r) / std_r
-        
+
         # Computing mean and var Z'|R' [2,3]
         var_z = (1 - lambda_) ** 2
         mu_z = r_norm * lambda_
-        
+
         log_var_z = torch.log(var_z)
-        
+
         # For computing the KL-divergence:
         # See eq. 7: https://arxiv.org/pdf/1606.05908.pdf
         capacity = -0.5 * (1 + log_var_z - mu_z**2 - var_z)
         return capacity
 
-    def _do_restrict_information(self, x, alpha):
+    def _do_restrict_information(self, x, alpha=None):
         """ Selectively remove information from x by applying noise """
+
+        alpha = alpha or self.alpha
         if alpha is None:
             raise RuntimeWarning("Alpha not initialized. Run _init() before using the bottleneck.")
 
