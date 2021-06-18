@@ -30,7 +30,7 @@ trap 'failures=$((failures+1))' ERR
 
 # run unit tests
 # check pep8
-py.test IBA
+flake8 IBA test --exclude test/notebooks
 # run pytorch and tensorflow separatly
 py.test --cov-append test/test_pytorch.py
 py.test --cov-append test/test_tensorflow_v1.py

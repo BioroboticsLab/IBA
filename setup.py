@@ -12,13 +12,20 @@ setuptools.setup(
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     packages=setuptools.find_packages(),
-    install_requires=['numpy', 'scikit-image', 'tqdm', 'Pillow<7.0.0'],
+    install_requires=[
+        'numpy', 
+        'scikit-image', 
+        'tqdm', 
+        'Pillow',
+        'packaging',
+    ],
     extras_require={
         'dev': [
             'pytest',
             'pytest-pep8',
             'pytest-cov',
             'pytest-readme',
+            'flake8',
             'sphinx',
             'sphinx_rtd_theme',
             'sphinx-autobuild',

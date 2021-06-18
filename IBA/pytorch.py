@@ -415,7 +415,6 @@ class IBA(nn.Module):
         # R is given.
         #
 
-
         # Normalizing [1]
         r_norm = (r - mean_r) / std_r
 

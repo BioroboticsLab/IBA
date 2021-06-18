@@ -54,12 +54,12 @@ from keras.engine.network import Network
 import numpy as np
 
 
-def to_list(l):
+def to_list(lst):
     """ If not list, wraps parameter into a list."""
-    if not isinstance(l, list):
-        return [l, ]
+    if not isinstance(lst, list):
+        return [lst, ]
     else:
-        return l
+        return lst
 
 
 def contains_activation(layer, activation=None):
