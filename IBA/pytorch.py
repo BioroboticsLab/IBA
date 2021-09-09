@@ -172,7 +172,7 @@ class TorchWelfordEstimator(nn.Module):
         """ Update estimates without altering x """
         if self.shape is None:
             # Initialize runnnig mean and std on first datapoint
-            self._init(x.shape[1:], x.device)
+            self._init(x.shape, x.device)
         for xi in x:
             self._neuron_nonzero += (xi != 0.).long()
             old_m = self.m.clone()
@@ -215,6 +215,13 @@ class _IBAForwardHook:
             return self.iba(inputs)
         elif self.input_or_output == "output":
             return self.iba(outputs)
+        
+class _IBAForwardPreHook:
+    def __init__(self, iba):
+        self.iba = iba
+
+    def __call__(self, m, inputs):
+        return self.iba(inputs)
 
 
 class IBA(nn.Module):
@@ -269,7 +276,8 @@ class IBA(nn.Module):
                  estimator=None,
                  progbar=False,
                  input_or_output="output",
-                 relu=False):
+                 relu=False,
+                 prehook=True):
         super().__init__()
         self.relu = relu
         self.beta = beta
@@ -293,6 +301,7 @@ class IBA(nn.Module):
         self._restrict_flow = False
         self._interrupt_execution = False
         self._hook_handle = None
+        self.prehook = prehook
 
         # Check if modifying forward hooks are supported by the current torch version
         if layer is not None:
@@ -315,9 +324,11 @@ class IBA(nn.Module):
             #         raise ValueError("Another IBA object is already attacted to the layer. "
             #                          "Remove it by calling `detach()`")
 
-            # Attach the bottleneck after the model layer as forward hook
-            self._hook_handle = layer.register_forward_hook(
-                _IBAForwardHook(self, input_or_output))
+            # Attach the bottleneck after or before the model layer
+            if self.prehook:
+                self._hook_handle = layer.register_forward_pre_hook(_IBAForwardPreHook(self))
+            else:
+                self._hook_handle = layer.register_forward_hook(_IBAForwardHook(self, input_or_output))
 
         else:
             pass
@@ -362,6 +373,8 @@ class IBA(nn.Module):
         either as-is or by restricting the flow of infomration.
         We use it also to estimate the distribution of `x` passing through the layer.
         """
+        if type(x) is tuple: #Tuple output workaround of DeepSurv Task
+            x = x[0] 
         if self._restrict_flow:
             return self._do_restrict_information(x)
         if self._estimate:
@@ -414,7 +427,7 @@ class IBA(nn.Module):
         # Remember that λ(R) and therefore the λ becomes a constant if
         # R is given.
         #
-
+        
         # Normalizing [1]
         r_norm = (r - mean_r) / std_r
 
@@ -447,8 +460,9 @@ class IBA(nn.Module):
 
         # Smoothen and expand alpha on batch dimension
         lamb = self.sigmoid(alpha)
-        lamb = lamb.expand(x.shape[0], x.shape[1], -1, -1)
-        lamb = self.smooth(lamb) if self.smooth is not None else lamb
+        # TODO: Smoothing
+#         lamb = lamb.expand(x.shape[0], x.shape[1], -1, -1)
+#         lamb = self.smooth(lamb) if self.smooth is not None else lamb
 
         self._buffer_capacity = self._kl_div(x, lamb, self._mean, self._std) * self._active_neurons
 
@@ -574,7 +588,7 @@ class IBA(nn.Module):
         Returns:
             The heatmap of the same shape as the ``input_t``.
         """
-        assert input_t.shape[0] == 1, "We can only fit one sample a time"
+#         assert input_t.shape[0] == 1, "We can only fit one sample a time"
 
         # TODO: is None
         beta = ifnone(beta, self.beta)
@@ -584,7 +598,9 @@ class IBA(nn.Module):
         batch_size = ifnone(batch_size, self.batch_size)
         active_neurons_threshold = ifnone(active_neurons_threshold, self._active_neurons_threshold)
 
-        batch = input_t.expand(batch_size, -1, -1, -1)
+#         batch = input_t.expand(batch_size, -1, -1, -1)
+        batch = input_t.expand(batch_size, -1)
+        buffer_caps = None
 
         # Reset from previous run or modifications
         self._reset_alpha()
@@ -614,7 +630,7 @@ class IBA(nn.Module):
         with self.restrict_flow():
             for _ in opt_range:
                 optimizer.zero_grad()
-                model_loss = model_loss_fn(batch)
+                model_loss = model_loss_fn(batch)['loss'] #dict?
                 # Taking the mean is equivalent of scaling the sum with 1/K
                 information_loss = self.capacity().mean()
                 loss = model_loss + beta * information_loss
@@ -625,8 +641,15 @@ class IBA(nn.Module):
                 self._loss.append(loss.item())
                 self._model_loss.append(model_loss.item())
                 self._information_loss.append(information_loss.item())
-
-        return self._get_saliency(mode=mode, shape=input_t.shape[2:])
+                
+                # mean over opt_range
+                if buffer_caps == None:
+                    buffer_caps = self._buffer_capacity[None]
+                else:
+                    buffer_caps = torch.cat((buffer_caps, self._buffer_capacity[None]), dim=0)
+                    
+#         return buffer_caps[8]
+        return torch.mean(buffer_caps, dim=0)
 
     def capacity(self):
         """
