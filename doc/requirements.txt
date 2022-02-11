@@ -63,7 +63,7 @@ pluggy==0.13.1
 port-for==0.3.1
 prometheus-client==0.7.1
 prompt-toolkit==3.0.3
-protobuf==3.11.3
+protobuf==3.15.0
 ptyprocess==0.6.0
 py==1.8.1
 pycodestyle==2.5.0
