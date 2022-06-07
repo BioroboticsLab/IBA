@@ -227,14 +227,14 @@ def plot_saliency_map(saliency_map, img=None, ax=None,
     import matplotlib.pyplot as plt
     from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
     from mpl_toolkits.axes_grid1.axes_size import Fixed
-    from skimage.color import rgb2grey, grey2rgb
+    from skimage.color import rgb2gray, gray2rgb
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(5.5, 4.0))
 
     if img is not None:
-        # Underlay the image as greyscale
-        grey = grey2rgb(rgb2grey(img))
-        ax.imshow(grey)
+        # Underlay the image as grayscale
+        gray = gray2rgb(rgb2gray(img))
+        ax.imshow(gray)
 
     ax1_divider = make_axes_locatable(ax)
     if type(colorbar_size) == float:
