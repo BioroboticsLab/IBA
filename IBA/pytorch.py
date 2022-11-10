@@ -432,7 +432,9 @@ class IBA(nn.Module):
     def _do_restrict_information(self, x, alpha=None):
         """ Selectively remove information from x by applying noise """
 
-        alpha = alpha or self.alpha
+        if alpha is None:
+            alpha = self.alpha
+
         if alpha is None:
             raise RuntimeWarning("Alpha not initialized. Run _init() before using the bottleneck.")
 
